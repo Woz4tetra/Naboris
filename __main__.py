@@ -5,6 +5,8 @@ from atlasbuggy import Orchestrator, run
 from naboris.hardware_interface import HardwareInterface
 from naboris.cli import NaborisCLI
 from naboris.soundfiles import Sounds
+from naboris.basic_guidance import BasicGuidance
+from naboris.odometry import Odometry
 
 class NaborisOrchestrator(Orchestrator):
     def __init__(self, event_loop):
@@ -18,14 +20,23 @@ class NaborisOrchestrator(Orchestrator):
             ("humming", "curiousity", "nothing", "confusion", "concern", "sleepy", "vibrating"),
             enabled=True
         )
-        self.add_nodes(self.hardware, self.cli, self.sounds)
+        self.odometry = Odometry()
+        self.guidance = BasicGuidance()
+
+        self.add_nodes(self.hardware, self.cli, self.sounds, self.guidance, self.odometry)
+
+        self.subscribe(self.sounds, self.cli, self.cli.sounds_tag)
+        self.subscribe(self.odometry, self.guidance, self.guidance.position_tag)
 
         self.subscribe(self.hardware, self.cli, self.cli.hardware_tag)
-        self.subscribe(self.sounds, self.cli, self.cli.sounds_tag)
+        self.subscribe(self.hardware, self.guidance, self.guidance.hardware_tag)
+        self.subscribe(self.hardware, self.odometry, self.odometry.encoder_tag, self.hardware.encoder_service)
+        self.subscribe(self.hardware, self.odometry, self.odometry.bno055_tag, self.hardware.bno055_service)
 
-    # async def loop(self):
-    #     while True:
-    #         print(self.hardware.left_tick, self.hardware.right_tick)
-    #         await asyncio.sleep(0.1)
+        # async def loop(self):
+        #     while True:
+        #         print(self.hardware.left_tick, self.hardware.right_tick)
+        #         await asyncio.sleep(0.1)
+
 
 run(NaborisOrchestrator)
