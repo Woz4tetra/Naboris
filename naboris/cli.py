@@ -35,6 +35,13 @@ class NaborisCLI(Node):
         self.sounds_sub = self.define_subscription(self.sounds_tag, queue_size=None, is_required=False)
         self.sounds = None
 
+        self.guidance_tag = "guidance"
+        self.guidance_sub = self.define_subscription(
+            self.guidance_tag, queue_size=None,
+            required_methods=("goto", "cancel")
+        )
+        self.guidance = None
+
         self.available_commands = dict(
             q=self.exit,
             l=self.spin_left,
@@ -42,7 +49,8 @@ class NaborisCLI(Node):
             d=self.drive,
             h=self.help,
             # euler=self.get_orientation,
-            # goto=self.goto_pos,
+            goto=self.goto_pos,
+            cancel=self.cancel_goto_pos,
             look=self.look,
             s=self.my_stop,
             red=self.red,
@@ -170,8 +178,6 @@ class NaborisCLI(Node):
 
     def my_stop(self, params):
         self.hardware.stop_motors()
-        if not self.is_subscribed(self.autonomous_tag):
-            self.autonomous.stop_goal()
 
     def say_hello(self, params):
         if self.is_subscribed(self.sounds_tag):
@@ -207,6 +213,28 @@ class NaborisCLI(Node):
     def say_random_sound(self, params):
         if self.is_subscribed(self.sounds_tag):
             self.sounds.play_random_sound()
+
+    def goto_pos(self, params):
+        if not self.is_subscribed(self.guidance_tag):
+            print("autonomous mode not enabled.")
+            return
+        data = params.split(" ")
+        x = None
+        y = None
+        theta = None
+        if len(data) >= 2:
+            x = float(data[0])
+            y = float(data[1])
+            print("going to %0.4f, %0.4f" % (x, y), end="")
+        if len(data) >= 3:
+            theta = float(data[2])
+            print(", %0.4f" % theta, end="")
+        print()
+
+        self.guidance.goto(x, y, theta)
+
+    def cancel_goto_pos(self, params):
+        self.guidance.cancel()
 
     def help(self, params):
         print("\nAvailable commands:")

@@ -1,12 +1,29 @@
+import re
 import time
 import math
 import asyncio
 
-from atlasbuggy import Node
+from atlasbuggy import Node, Message
 
-from lms200.messages import OdometryMessage
-from babybuggy.quad_encoder import EncoderMessage
-from babybuggy.bno055 import Bno055Message
+from naboris.hardware_interface import EncoderMessage, Bno055Message
+
+
+class PoseMessage(Message):
+    def __init__(self, timestamp=None, n=None, x_mm=0.0, y_mm=0.0, theta_rad=0.0, delta_xy_mm=0.0,
+                 delta_theta_rad=0.0, delta_t=0.0):
+        self.x_mm = x_mm
+        self.y_mm = y_mm
+        self.theta_rad = theta_rad
+
+        self.delta_xy_mm = delta_xy_mm
+        self.delta_theta_rad = delta_theta_rad
+        self.delta_t = delta_t
+
+        super(PoseMessage, self).__init__(timestamp, n)
+
+    def __str__(self):
+        return "%s(t=%s, n=%s, x=%s, y=%s, th=%s)" % (
+            self.__class__.__name__, self.timestamp, self.n, self.x_mm, self.y_mm, self.theta_rad)
 
 
 class Odometry(Node):
@@ -42,53 +59,53 @@ class Odometry(Node):
         prev_t = time.time()
 
         while True:
-            odometry_message = OdometryMessage()
+            pose_message = PoseMessage()
 
             enc_updated = not self.encoder_queue.empty()
             if enc_updated:
                 while not self.encoder_queue.empty():
                     encoder_message = await self.encoder_queue.get()
-                    odometry_message.delta_t = encoder_message.dt
-                    odometry_message.delta_xy_mm = -encoder_message.delta_arc
+                    pose_message.delta_t = encoder_message.dt
+                    pose_message.delta_xy_mm = -encoder_message.delta_arc
 
                     self.num_enc_messages += 1
             else:
-                odometry_message.delta_t = 0.0
-                odometry_message.delta_xy_mm = 0.0
+                pose_message.delta_t = 0.0
+                pose_message.delta_xy_mm = 0.0
 
             bno_updated = not self.bno055_queue.empty()
             if bno_updated:
                 while not self.bno055_queue.empty():
                     bno055_message = await self.bno055_queue.get()
-                    current_angle = math.degrees(bno055_message.euler.z)
-                    if current_angle - self.prev_angle > 180:
-                        current_angle -= 360
-                    odometry_message.delta_theta_degrees = current_angle - self.prev_angle
+                    current_angle = bno055_message.euler.z
+                    if current_angle - self.prev_angle > math.pi:
+                        current_angle -= 2 * math.pi
+                    pose_message.delta_theta_rad = current_angle - self.prev_angle
                     self.prev_angle = current_angle
 
                     self.num_bno_messages += 1
 
                 if not enc_updated:
-                    odometry_message.delta_t = bno055_message.timestamp - prev_t
+                    pose_message.delta_t = bno055_message.timestamp - prev_t
                 prev_t = bno055_message.timestamp
             else:
-                odometry_message.delta_theta_degrees = 0.0
+                pose_message.delta_theta_rad = 0.0
 
             if enc_updated or bno_updated:
-                odometry_message.timestamp = time.time()
-                odometry_message.n = message_num
+                pose_message.timestamp = time.time()
+                pose_message.n = message_num
 
                 message_num += 1
 
-                self.odom_th += odometry_message.delta_theta_degrees
-                self.odom_x += math.cos(math.radians(self.odom_th)) * odometry_message.delta_xy_mm
-                self.odom_y += math.sin(math.radians(self.odom_th)) * odometry_message.delta_xy_mm
+                self.odom_th += pose_message.delta_theta_rad
+                self.odom_x += math.cos(self.odom_th) * pose_message.delta_xy_mm
+                self.odom_y += math.sin(self.odom_th) * pose_message.delta_xy_mm
 
-                self.log_to_buffer(time.time(), odometry_message)
-                self.broadcast_nowait((self.odom_x, self.odom_y, self.odom_th), self.odom_position_service)
-                await self.broadcast(odometry_message)
+                self.log_to_buffer(time.time(), pose_message)
+                await self.broadcast(pose_message)
             else:
                 await asyncio.sleep(0.01)
 
     async def teardown(self):
-        self.logger.info("%s BNO055 messages received. %s encoder messages received" % (self.num_bno_messages, self.num_enc_messages))
+        self.logger.info("%s BNO055 messages received. %s encoder messages received" % (
+            self.num_bno_messages, self.num_enc_messages))
