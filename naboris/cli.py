@@ -89,6 +89,7 @@ class NaborisCLI(Node):
 
     def take(self):
         self.hardware = self.hardware_sub.get_producer()
+        self.guidance = self.guidance_sub.get_producer()
         if self.is_subscribed(self.sounds_tag):
             self.sounds = self.sounds_sub.get_producer()
 

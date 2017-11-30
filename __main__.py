@@ -20,7 +20,7 @@ class NaborisOrchestrator(Orchestrator):
             enabled=True
         )
         self.odometry = Odometry()
-        self.guidance = BasicGuidance()
+        self.guidance = BasicGuidance(enabled=True)
 
         self.add_nodes(self.hardware, self.cli, self.sounds, self.guidance, self.odometry)
 
@@ -31,7 +31,8 @@ class NaborisOrchestrator(Orchestrator):
         self.subscribe(self.odometry, self.guidance, self.guidance.position_tag)
         self.subscribe(self.hardware, self.guidance, self.guidance.hardware_tag)
 
-        self.subscribe(self.hardware, self.odometry, self.odometry.encoder_tag, self.hardware.encoder_service)
+        self.subscribe(self.hardware, self.odometry, self.odometry.right_encoder_tag, self.hardware.right_encoder_service)
+        self.subscribe(self.hardware, self.odometry, self.odometry.left_encoder_tag, self.hardware.left_encoder_service)
         self.subscribe(self.hardware, self.odometry, self.odometry.bno055_tag, self.hardware.bno055_service)
 
         # async def loop(self):

@@ -14,73 +14,51 @@ dist_between_wheels_mm = 109.0
 
 
 class EncoderMessage(Message):
-    message_regex = r"EncoderMessage\(t: (\d.*), n: (\d*), pt: (\d.*), et: (\d.*), r: (-?[0-9]\d*), l: (-?[0-9]\d*), " \
-                    r"dr: (-?[0-9]\d*\.\d+), dl: (-?[0-9]\d*\.\d+)\)"
+    message_regex = r"EncoderMessage\(t=(\d.*), n=(\d*), pt=(\d.*), tick=(-?[0-9]\d*), dist=(-?[0-9]\d*\.\d+), ptick=(-?[0-9]\d*), pdist=(-?[0-9]\d*\.\d+)\)"
 
-    def __init__(self, encoder_time=0.0, right_tick=0, left_tick=0, commanded_angle_deg=0,
-                 prev_message=None, timestamp=None, packet_time=None, n=None):
-        self.encoder_time = encoder_time
-        self.packet_time = packet_time
-        self.right_tick = right_tick
-        self.left_tick = left_tick
-
-        self.compute_deltas(prev_message, commanded_angle_deg)
-
+    def __init__(self, tick, dist_mm, prev_message=None, timestamp=None, n=None):
         super(EncoderMessage, self).__init__(timestamp, n)
 
-    def compute_deltas(self, prev_message, commanded_angle_deg):
-        self.right_dist = None if self.right_tick is None else self.right_tick * ticks_to_mm
-        self.left_dist = None if self.left_tick is None else self.left_tick * ticks_to_mm
+        self.tick = tick
+        self.dist_mm = dist_mm
 
-        self.left_delta_tick = None if prev_message is None else self.left_tick - prev_message.left_tick
-        self.right_delta_tick = None if prev_message is None else self.right_tick - prev_message.right_tick
+        if prev_message is None:
+            self.prev_tick = self.tick
+            self.prev_dist_mm = self.dist_mm
+            self.prev_timestamp = self.timestamp
+        else:
+            self.prev_tick = prev_message.tick
+            self.prev_dist_mm = prev_message.dist_mm
+            self.prev_timestamp = prev_message.timestamp
 
-        self.delta_theta = None
-        self.avg_dist = None
-        self.right_delta_dist = None
-        self.left_delta_dist = None
-        if prev_message is not None:
-            self.right_delta_dist = self.right_delta_tick * ticks_to_mm
-            self.left_delta_dist = self.left_delta_tick * ticks_to_mm
-
-            tick_magnitude = max(abs(self.right_delta_tick), abs(self.left_delta_tick))
-
-            offset_factor = ticks_to_mm * tick_magnitude / dist_between_wheels_mm
-            if 0 <= commanded_angle_deg < 90:
-                angle_offset = offset_factor * commanded_angle_deg / 90
-            elif 90 <= commanded_angle_deg < 270:
-                angle_offset = offset_factor * (1 - (commanded_angle_deg - 90) / 90)
-            else:
-                angle_offset = offset_factor * (-1 + (commanded_angle_deg - 270) / 90)
-
-            self.delta_theta = (self.right_delta_dist - self.left_delta_dist) / (dist_between_wheels_mm * 2)
-
-            if commanded_angle_deg == 0 or commanded_angle_deg == 180:
-                self.delta_dist = abs(self.right_delta_dist + self.left_delta_dist) / 2
-            else:
-                self.delta_dist = tick_magnitude * ticks_to_mm
-
-            self.delta_theta -= angle_offset
+        self.dt = self.timestamp - self.prev_timestamp
+        self.delta_arc = self.dist_mm - self.prev_dist_mm
 
     def __str__(self):
-        return "%s(t: %s, n: %s, pt: %s, et: %s, r: %s, l: %s, dr: %s, dl: %s)" % (
-            self.name, self.timestamp, self.n, self.packet_time, self.encoder_time,
-            self.right_tick, self.left_tick, self.right_dist, self.left_dist
+        return "%s(t=%s, n=%s, pt=%s, tick=%s, dist=%s, ptick=%s, pdist=%s)" % (
+            self.name, self.timestamp, self.n, self.prev_timestamp, self.tick, self.dist_mm, self.prev_tick,
+            self.prev_dist_mm
         )
 
     @classmethod
     def parse(cls, message):
         match = re.match(cls.message_regex, message)
         if match is not None:
-            message = cls()
-            message.timestamp = float(match.group(1))
-            message.n = int(match.group(2))
-            message.packet_time = float(match.group(3))
-            message.encoder_time = float(match.group(4))
-            message.right_tick = int(match.group(5))
-            message.left_tick = int(match.group(6))
-            message.right_dist = float(match.group(7))
-            message.left_dist = float(match.group(7))
+            timestamp = float(match.group(1))
+            n = int(match.group(2))
+            prev_time = float(match.group(3))
+            tick = int(match.group(4))
+            # dist = float(match.group(5))
+            dist = tick * ticks_to_mm
+            # assert dist == float(match.group(5)), "dist: tick=%s, %s != %s" % (tick, dist, match.group(5))
+
+            prev_tick = int(match.group(6))
+            # prev_dist = float(match.group(7))
+            prev_dist = prev_tick * ticks_to_mm
+            # assert prev_dist == float(match.group(7)), "prev dist: prev_tick=%s, %s != %s" % (prev_tick, prev_dist, match.group(7))
+
+            prev_message = cls(prev_tick, prev_dist, timestamp=prev_time, n=n - 1)
+            message = cls(tick, dist, prev_message, timestamp, n)
 
             return message
         else:
@@ -107,10 +85,16 @@ class HardwareInterface(Arduino):
         self.right_updated = False
         self.left_updated = False
 
-        self.encoder_message = None
-        self.enc_packet_num = 0
-        self.encoder_service = "encoder"
-        self.define_service(self.encoder_service, message_type=EncoderMessage)
+        self.right_encoder_message = None
+        self.left_encoder_message = None
+        self.right_packet_num = 0
+        self.left_packet_num = 0
+
+        self.right_encoder_service = "right_encoder"
+        self.define_service(self.right_encoder_service, message_type=EncoderMessage)
+
+        self.left_encoder_service = "left_encoder"
+        self.define_service(self.left_encoder_service, message_type=EncoderMessage)
 
         self.bno055_packet_header = "imu"
         self.bno055_packet_num = 0
@@ -164,31 +148,33 @@ class HardwareInterface(Arduino):
             header = packet[1]
             data = packet[2:]
             if header == "r":
-                encoder_time, self.right_tick = data.split("\t")
-                self.right_tick = -int(self.right_tick)  # right encoder reversed
-                self.right_updated = True
+                encoder_time, right_tick = data.split("\t")
+                right_tick = -int(right_tick)  # right encoder reversed
+                right_dist = right_tick * ticks_to_mm
+
+                self.right_encoder_message = EncoderMessage(
+                    right_tick, right_dist, self.right_encoder_message,
+                    packet_time, self.right_packet_num
+                )
+                self.right_packet_num += 1
+                self.log_to_buffer(self.right_encoder_message.timestamp, self.right_encoder_message)
+                await self.broadcast(self.right_encoder_message, self.right_encoder_service)
 
             elif header == "l":
-                encoder_time, self.left_tick = data.split("\t")
-                self.left_tick = int(self.left_tick)
-                self.left_updated = True
+                encoder_time, left_tick = data.split("\t")
+                left_tick = int(left_tick)  # right encoder reversed
+                left_dist = left_tick * ticks_to_mm
+
+                self.left_encoder_message = EncoderMessage(
+                    left_tick, left_dist, self.left_encoder_message,
+                    packet_time, self.left_packet_num
+                )
+                self.left_packet_num += 1
+                self.log_to_buffer(self.left_encoder_message.timestamp, self.left_encoder_message)
+                await self.broadcast(self.right_encoder_message, self.left_encoder_service)
 
             else:
                 raise ValueError("Invalid encoder header. Packet: %s" % packet)
-
-            if self.right_updated and self.left_updated:
-                encoder_time = float(encoder_time) / 1000
-                self.encoder_message = EncoderMessage(
-                    encoder_time, self.right_tick, self.left_tick, self.commanded_angle,
-                    self.encoder_message, time.time(), packet_time, self.enc_packet_num,
-                )
-                self.enc_packet_num += 1
-
-                self.log_to_buffer(packet_time, self.encoder_message)
-                await self.broadcast(self.encoder_message, self.encoder_service)
-
-                self.right_updated = False
-                self.left_updated = False
 
         elif packet.startswith(self.bno055_packet_header):
             message = self.bno055.parse_packet(packet_time, packet, self.bno055_packet_num)
@@ -229,7 +215,7 @@ class HardwareInterface(Arduino):
             fraction_speed = 2 * speed / 90 * (angle - 270) - speed
             self.command_motors(fraction_speed + angular, speed - angular, speed + angular, fraction_speed - angular)
 
-        self.logger.info("speed=%s, angle=%s, angular=%s" % (speed, angle, angular))
+        # self.logger.info("speed=%s, angle=%s, angular=%s" % (speed, angle, angular))
 
     def spin(self, speed):
         self.drive(angular=speed)
@@ -238,8 +224,8 @@ class HardwareInterface(Arduino):
         m1, m2, m3, m4 = int(m1), int(m2), int(m3), int(m4)
         command = "d%04d%04d%04d%04d" % (m1, m2, m3, m4)
         self.write(command)
-        self.logger.info("m1=%s, m2=%s, m3=%s, m4=%s" % (m1, m2, m3, m4))
-        self.logger.info("command: %s" % command)
+        # self.logger.info("m1=%s, m2=%s, m3=%s, m4=%s" % (m1, m2, m3, m4))
+        # self.logger.info("command: %s" % command)
 
     def stop_motors(self):
         self.write("h")
