@@ -1,6 +1,8 @@
 import cv2
 import time
 import json
+import base64
+import struct
 import asyncio
 import numpy as np
 from threading import Lock
@@ -11,14 +13,14 @@ from atlasbuggy.opencv import ImageMessage
 
 
 class NaborisSocketClient(Node):
-    def __init__(self, address=("10.76.76.1", 80), enabled=True):
+    def __init__(self, width=640, height=480, address=("10.76.76.1", 80), enabled=True):
         super(NaborisSocketClient, self).__init__(enabled)
         self.address = address
 
         self.buffer = b''
 
-        self.width = 640
-        self.height = 480
+        self.width = width
+        self.height = height
         self.num_frames = 0
         self.current_frame_num = 0
 
@@ -37,14 +39,7 @@ class NaborisSocketClient(Node):
         self.fps_avg = 30.0
         self.prev_t = None
 
-    def set_frame(self):
-        pass
-
-    def set_pause(self):
-        pass
-
-    def get_pause(self):
-        return False
+        self.credentials = base64.b64encode(b'robot:naboris').decode('ascii')
 
     async def setup(self):
         self.connection = HTTPConnection("%s:%s" % (self.address[0], self.address[1]))
@@ -57,8 +52,11 @@ class NaborisSocketClient(Node):
                 buf = response.read(self.chunk_size)
 
     async def loop(self):
-        headers = {'Content-type': 'image/jpeg'}
-        self.connection.request("GET", "/api/robot/rightcam", headers=headers)
+        headers = {
+            'Content-type': 'image/jpeg',
+            'Authorization' : 'Basic %s' %  self.credentials
+        }
+        self.connection.request("GET", "/api/robot/rightcam_time", headers=headers)
         response = self.connection.getresponse()
 
         for resp in self.recv(response):
@@ -70,11 +68,31 @@ class NaborisSocketClient(Node):
             response_2 = self.buffer.find(b'\xff\xd9')
 
             if response_1 != -1 and response_2 != -1:
-                jpg = self.buffer[response_1:response_2 + 2]
-                self.buffer = self.buffer[response_2 + 2:]
+                response_2 += 2
+                timestamp_index = response_2 + 8
+                width_index = timestamp_index + 2
+                height_index = width_index + 2
+
+                jpg = self.buffer[response_1:response_2]
+                timestamp = struct.unpack('d', self.buffer[response_2:timestamp_index])[0]
+                width = int.from_bytes(self.buffer[timestamp_index:width_index], 'big')
+                height = int.from_bytes(self.buffer[width_index:height_index], 'big')
+
+                if width != self.width:
+                    self.logger.info("Size changed to %s, %s" % (width, height))
+                    self.width = width
+
+                if height != self.height:
+                    self.logger.info("Size changed to %s, %s" % (width, height))
+                    self.height = height
+
+                self.buffer = self.buffer[timestamp_index:]
                 image = self.to_image(jpg)
 
-                message = ImageMessage(image, self.current_frame_num)
+                message = ImageMessage(image, self.current_frame_num, timestamp=timestamp)
+                self.log_to_buffer(time.time(), "Web socket image received: %s" % message)
+                self.logger.info("Web socket image received: %s" % message)
+
                 await self.broadcast(message)
 
                 self.current_frame_num += 1
@@ -82,6 +100,8 @@ class NaborisSocketClient(Node):
             await asyncio.sleep(0.0)
 
             self.poll_for_fps()
+
+        self.logger.info("Response ended. Closing.")
 
     def send_command(self, command):
         with self.response_lock:

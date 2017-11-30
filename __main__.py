@@ -5,6 +5,8 @@ from naboris.cli import NaborisCLI
 from naboris.soundfiles import Sounds
 from naboris.basic_guidance import BasicGuidance
 from naboris.odometry import Odometry
+from naboris.website_client import NaborisSocketClient
+from naboris.picamera import PiCamera
 
 
 class NaborisOrchestrator(Orchestrator):
@@ -21,8 +23,10 @@ class NaborisOrchestrator(Orchestrator):
         )
         self.odometry = Odometry()
         self.guidance = BasicGuidance(enabled=True)
+        self.client = NaborisSocketClient(640, 480)
+        self.picamera = PiCamera(enabled=True)
 
-        self.add_nodes(self.hardware, self.cli, self.sounds, self.guidance, self.odometry)
+        self.add_nodes(self.hardware, self.cli, self.sounds, self.guidance, self.odometry, self.client, self.picamera)
 
         self.subscribe(self.sounds, self.cli, self.cli.sounds_tag)
         self.subscribe(self.hardware, self.cli, self.cli.hardware_tag)
