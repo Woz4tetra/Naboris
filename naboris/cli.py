@@ -1,5 +1,5 @@
-import re
 import sys
+import math
 import asyncio
 import traceback
 from atlasbuggy import Node
@@ -222,16 +222,21 @@ class NaborisCLI(Node):
         x = None
         y = None
         theta = None
-        if len(data) >= 2:
-            x = float(data[0])
-            y = float(data[1])
-            print("going to %0.4f, %0.4f" % (x, y), end="")
-        if len(data) >= 3:
-            theta = float(data[2])
-            print(", %0.4f" % theta, end="")
-        print()
 
-        self.guidance.goto(x, y, theta)
+        if len(data) == 1:
+            theta = float(data[0])
+            print("going to angle: %sdeg" % theta)
+        else:
+            if len(data) >= 2:
+                x = float(data[0])
+                y = float(data[1])
+                print("going to %0.4fmm, %0.4fmm" % (x, y), end="")
+            if len(data) >= 3:
+                theta = float(data[2])
+                print(", %0.4fdeg" % theta, end="")
+            print()
+
+        self.guidance.goto(x, y, math.radians(theta))
 
     def cancel_goto_pos(self, params):
         self.guidance.cancel()
