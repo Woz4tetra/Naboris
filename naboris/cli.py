@@ -19,12 +19,10 @@ class NaborisCLI(Node):
             queue_size=None,
             required_methods=(
                 "drive",
+                "set_servo",
                 "look_straight",
                 "look_up",
                 "look_down",
-                "look_left",
-                "look_right",
-                "set_turret",
                 "set_all_leds",
                 "stop_motors",
             )
@@ -38,7 +36,7 @@ class NaborisCLI(Node):
         self.guidance_tag = "guidance"
         self.guidance_sub = self.define_subscription(
             self.guidance_tag, queue_size=None,
-            required_methods=("goto", "cancel")
+            required_methods=("goto", "cancel", "reset")
         )
         self.guidance = None
 
@@ -51,6 +49,7 @@ class NaborisCLI(Node):
             # euler=self.get_orientation,
             goto=self.goto_pos,
             cancel=self.cancel_goto_pos,
+            reset=self.reset_odometry,
             look=self.look,
             s=self.my_stop,
             red=self.red,
@@ -122,37 +121,14 @@ class NaborisCLI(Node):
         self.hardware.drive(speed, angle, angular)
 
     def look(self, params):
-        data = params.split(" ")
-        if data[0] == "":
+        if params == "":
             self.hardware.look_straight()
-        elif data[0] == "down":
-            if len(data) > 1:
-                value = int(data[1])
-                self.hardware.look_up(value)
-            else:
-                self.hardware.look_down()
-        elif data[0] == "up":
-            if len(data) > 1:
-                value = int(data[1])
-                self.hardware.look_up(value)
-            else:
-                self.hardware.look_up()
-        elif data[0] == "left":
-            if len(data) > 1:
-                value = int(data[1])
-                self.hardware.look_left(value)
-            else:
-                self.hardware.look_left()
-        elif data[0] == "right":
-            if len(data) > 1:
-                value = int(data[1])
-                self.hardware.look_right(value)
-            else:
-                self.hardware.look_right()
+        elif params == "down":
+            self.hardware.look_down()
+        elif params == "up":
+            self.hardware.look_up()
         else:
-            if len(data) == 2:
-                yaw, azimuth = data
-                self.hardware.set_turret(int(yaw), int(azimuth))
+            self.hardware.set_servo(params)
 
     def rgb(self, params):
         r, g, b = [int(x) for x in params.split(" ")]
@@ -227,6 +203,7 @@ class NaborisCLI(Node):
         if len(data) == 1:
             theta = float(data[0])
             print("going to angle: %sdeg" % theta)
+            theta = math.radians(theta)
         else:
             if len(data) >= 2:
                 x = float(data[0])
@@ -235,12 +212,16 @@ class NaborisCLI(Node):
             if len(data) >= 3:
                 theta = float(data[2])
                 print(", %0.4fdeg" % theta, end="")
+                theta = math.radians(theta)
             print()
 
-        self.guidance.goto(x, y, math.radians(theta))
+        self.guidance.goto(x, y, theta)
 
     def cancel_goto_pos(self, params):
         self.guidance.cancel()
+
+    def reset_odometry(self, params):
+        self.guidance.reset()
 
     def help(self, params):
         print("\nAvailable commands:")

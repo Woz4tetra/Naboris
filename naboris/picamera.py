@@ -126,8 +126,8 @@ class PiCamera(Node):
             if self.frame_is_ready and not self.paused:
                 message = ImageMessage(self.frame, self.num_frames, self.width, self.height)
                 # self.log_to_buffer(time.time(), "PiCamera image received: %s" % message)
-                self.logger.info("PiCamera image received: %s" % message)
-                num_broadcasts = await self.broadcast(message)
+                # self.logger.info("PiCamera image received: %s" % message)
+                await self.broadcast(message)
                 self.frame_is_ready = False
             else:
                 await asyncio.sleep(1 / self.fps)

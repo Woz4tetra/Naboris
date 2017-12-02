@@ -13,9 +13,10 @@ class BasicGuidance(Node):
         super(BasicGuidance, self).__init__(enabled)
 
         # define subscription to node that produces current position
-        self.position_tag = "position"
-        self.position_sub = self.define_subscription(self.position_tag, message_type=PoseMessage)
-        self.position_queue = None
+        self.odometry_tag = "position"
+        self.odometry_sub = self.define_subscription(self.odometry_tag, message_type=PoseMessage)
+        self.odometry_queue = None
+        self.odometry = None
 
         # node that contains motor commands
         self.hardware_tag = "hardware"
@@ -39,9 +40,10 @@ class BasicGuidance(Node):
         self.current_y = 0.0  # current position y in mm
         self.current_th = 0.0 # current angle theta in radians
 
-        self.angle_pid = PID(150.0, 150.0, 75.0)
+        # self.angle_pid = PID(120.0, 20.0, 0.0)  # solid
+        self.angle_pid = PID(200.0, 50.0, 0.0)  # carpet
         self.dist_pid = PID(1.0, 0.0, 0.0)
-        self.angular_pid = PID(1.0, 0.0, 0.0)
+        self.angular_pid = PID(200.0, 50.0, 0.0)
 
         self.refresh_rate = 0.003  # how rapidly the controller should update in seconds (approximate)
         self.dist_error = 5.0  # stopping condition for distance (mm)
@@ -50,7 +52,8 @@ class BasicGuidance(Node):
         self.min_motor_power = 45
 
     def take(self):
-        self.position_queue = self.position_sub.get_queue()
+        self.odometry_queue = self.odometry_sub.get_queue()
+        self.odometry = self.odometry_sub.get_producer()
         self.hardware = self.hardware_sub.get_producer()
         self.cancel()  # no goal available at the start. Set the corresponding flags
 
@@ -98,11 +101,13 @@ class BasicGuidance(Node):
 
     async def update_current_state(self):
         """Update current position if a new value is available"""
-        if not self.position_queue.empty():
-            pose_message = await self.position_queue.get()
+        if not self.odometry_queue.empty():
+            pose_message = await self.odometry_queue.get()
             self.current_x = pose_message.x_mm
             self.current_y = pose_message.y_mm
             self.current_th = pose_message.theta_rad
+
+            # print(self.current_x, self.current_y, self.current_th)
 
     async def _rotate_to_angle(self, goal_th):
         """Rotate to an angle. For internal use."""
@@ -117,12 +122,13 @@ class BasicGuidance(Node):
         start_time = time.time()
         prev_time = time.time()
 
+        satisfied = False
         # keep updating until angle is minimized or timeout is reached
-        while abs(angle_error) > self.angle_error and (time.time() - start_time) < self.pid_timeout:
+        while not satisfied:
             await self.update_current_state()
             angle_error = self.convert_angle_range(goal_th - self.current_th)
 
-            angle_error = math.copysign(math.sqrt(abs(angle_error)), angle_error)
+            # angle_error = math.copysign(math.sqrt(abs(angle_error)), angle_error)
 
             # apply spinning motor power (-255...255) depending on the angle error
             current_time = time.time()
@@ -135,29 +141,36 @@ class BasicGuidance(Node):
             self.hardware.spin(int(motor_power))
             await asyncio.sleep(self.refresh_rate)
 
-            if not self.goal_available_event.is_set():
-                self.logger.info("Cancelling rotation.")
-                break
+            if (time.time() - start_time) >= self.pid_timeout:
+                # cancel the rest of the operations if timeout was reached (goal wasn't achieved)
+                self.logger.warning("Rotation timed out! Cancelling operation.")
+                self.cancel()
+                return
 
-        self.hardware.stop_motors()
+            if abs(angle_error) < self.angle_error:
+                self.hardware.stop_motors()
+                await asyncio.sleep(0.5)
+                await self.update_current_state()
+                if abs(angle_error) < self.angle_error:
+                    satisfied = True
 
-        # cancel the rest of the operations if timeout was reached (goal wasn't achieved)
-        if (time.time() - start_time) >= self.pid_timeout:
-            self.logger.warning("Rotation timed out! Cancelling operation. Error is %s" % angle_error)
-            self.cancel()
-        else:
-            self.logger.info("Rotation successful! Error is %s" % angle_error)
+        self.logger.info("Rotation successful! Error is %s" % angle_error)
 
     async def _drive_to_point(self, goal_th):
         """Drive to a distance and maintain the current angle. For internal use."""
 
         await self.update_current_state()
-        dist_error = math.sqrt((self.goal_x - self.current_x) ** 2 + (self.goal_y - self.current_y) ** 2)
+        dist_error, lateral_error = self.shift_reference_frame(
+            self.goal_x - self.current_x, self.goal_y - self.current_y, goal_th
+        )
 
         self.logger.info(
             "Driving to x=%s, y=%s. distance error is %s" % (
                 self.goal_x, self.goal_y, dist_error)
         )
+
+        # extend the timeout arbitrarily based on distance
+        pid_timeout = self.pid_timeout + dist_error * 1.5
 
         # reset PID's
         self.dist_pid.reset()
@@ -166,86 +179,57 @@ class BasicGuidance(Node):
         start_time = time.time()
         prev_time = time.time()
 
+        satisfied = False
         # keep updating until distance is minimized or timeout is reached
-        while abs(dist_error) > self.dist_error and (time.time() - start_time) < self.pid_timeout:
+        while not satisfied:
             await self.update_current_state()
-            dist_error = math.sqrt((self.goal_x - self.current_x) ** 2 + (self.goal_y - self.current_y) ** 2)
-            angle_error = self.convert_angle_range(goal_th - self.current_th)
+            distance = math.sqrt((self.goal_x - self.current_x) ** 2 + (self.goal_y - self.current_y) ** 2)
+            dist_error, lateral_error = self.shift_reference_frame(
+                self.goal_x - self.current_x, self.goal_y - self.current_y, goal_th
+            )
+
+            angle_error = -self.convert_angle_range(goal_th - self.current_th)
 
             current_time = time.time()
             dt = current_time - prev_time
             prev_time = current_time
+
             forward_power = self.dist_pid.update(dist_error, dt)
             angle_power = self.angular_pid.update(angle_error, dt)
+
             if abs(forward_power) < self.min_motor_power:
                 forward_power = math.copysign(self.min_motor_power, forward_power)
 
             # apply forward/backward motor power (-255...255) depending on the distance error
             # apply rotational motor power (-255...255) depending on angle error
-            self.hardware.drive(int(forward_power), angular=int(angle_power))
+            self.hardware.drive(int(forward_power), int(angle_power))
             await asyncio.sleep(self.refresh_rate)
 
             if not self.goal_available_event.is_set():
                 self.logger.info("Cancelling drive.")
                 break
 
-        self.hardware.stop_motors()
+            if (time.time() - start_time) >= pid_timeout:
+                # cancel the rest of the operations if timeout was reached (goal wasn't achieved)
+                self.logger.warning("Drive timed out! Cancelling operation.")
+                self.cancel()
+                return
 
-        # cancel the rest of the operations if timeout was reached (goal wasn't achieved)
-        if (time.time() - start_time) >= self.pid_timeout:
-            self.logger.warning("Drive timed out! Cancelling operation.")
-            self.cancel()
-        else:
-            self.logger.info("Drive successful! Error is %s" % dist_error)
+            if abs(dist_error) < self.dist_error:
+                self.hardware.stop_motors()
+                await asyncio.sleep(0.5)
+                await self.update_current_state()
+                if abs(dist_error) < self.dist_error:
+                    satisfied = True
 
-    # async def _drive_to_point(self):
-    #     await self.update_current_state()
-    #     dist_error, lateral_error = self.shift_reference_frame(
-    #         self.goal_x - self.current_x, self.goal_y - self.current_y, self.goal_th
-    #     )
-    #
-    #     self.logger.info(
-    #         "Driving to x=%s, y=%s. distance error is %s, lateral error is %s" % (
-    #             self.goal_x, self.goal_y, dist_error, lateral_error)
-    #     )
-    #
-    #     self.dist_pid.reset()
-    #     self.angular_pid.reset()
-    #
-    #     start_time = time.time()
-    #     prev_time = time.time()
-    #
-    #     while abs(dist_error) > self.dist_error or (time.time() - start_time) < self.pid_timeout:
-    #         await self.update_current_state()
-    #         dist_error, lateral_error = self.shift_reference_frame(
-    #             self.goal_x - self.current_x, self.goal_y - self.current_y, self.goal_th
-    #         )
-    #
-    #         current_time = time.time()
-    #         dt = current_time - prev_time
-    #         prev_time = current_time
-    #         forward_power = self.dist_pid.update(dist_error, dt)
-    #         angle_power = self.angular_pid.update(lateral_error, dt)
-    #
-    #         self.hardware.drive(int(forward_power), angular=int(angle_power))
-    #         await asyncio.sleep(self.refresh_rate)
-    #
-    #         if self.goal_available_event.is_set():
-    #             self.logger.info("Cancelling drive.")
-    #             break
-    #
-    #     self.hardware.stop_motors()
-    #
-    #     if (time.time() - start_time) >= self.pid_timeout:
-    #         self.logger.warning("Drive timed out! Cancelling operation.")
-    #         self.cancel()
-    #     else:
-    #         self.logger.info("Drive successful! Error is %s" % dist_error)
+        self.logger.info("Drive successful! Error is %s" % dist_error)
 
     def cancel(self):
         """Cancel a goal request"""
         self.goal_available_event.clear()
-        self.position_sub.enabled = False
+        self.odometry_sub.enabled = False
+        while not self.odometry_queue.empty():
+            self.odometry_queue.get_nowait()
 
         self.logger.info("Cancelling goal.")
 
@@ -267,6 +251,23 @@ class BasicGuidance(Node):
         self.end_goal_th = theta
 
         self.goal_available_event.set()
-        self.position_sub.enabled = True
+        self.odometry_sub.enabled = True
 
         self.logger.info("Submitting goal (x=%s, y=%s, th=%s)" % (x, y, theta))
+
+    def reset(self):
+        self.angle_pid.reset()
+        self.dist_pid.reset()
+        self.lateral_pid.reset()
+        self.angular_pid.reset()
+
+        while not self.odometry_queue.empty():
+            self.odometry_queue.get_nowait()
+
+        self.current_x = 0.0
+        self.current_y = 0.0
+        self.current_th = 0.0
+
+        self.odometry.reset()
+
+        self.logger.info("Reset to initial conditions")

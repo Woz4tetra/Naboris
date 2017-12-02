@@ -1,16 +1,3 @@
-/*
-This is a test sketch for the Adafruit assembled Motor Shield for Arduino v2
-It won't work with v1.x motor shields! Only for the v2's with built in PWM
-control
-
-For use with the Adafruit Motor Shield v2
----->	http://www.adafruit.com/products/1438
-
-This sketch creates a fun motor party on your desk *whiirrr*
-Connect a unipolar/bipolar stepper to M3/M4
-Connect a DC motor to M1
-Connect a hobby servo to SERVO1
-*/
 
 #include <Wire.h>
 #include <Adafruit_MotorShield.h>
@@ -114,16 +101,12 @@ uint32_t prev_enc_time = 0;
 char r_enc_print_buffer[R_ENC_BUF_LEN];
 char l_enc_print_buffer[L_ENC_BUF_LEN];
 
-/* ----------------------------- *
- * Servo turret global variables *
- * ----------------------------- */
+/* ---------------------- *
+ * Servo global variables *
+ * ---------------------- */
 
-#define AZIMUTH_PIN 9
-#define YAW_PIN 10
-Servo servo1;
-Servo servo2;
-bool attached = false;
-uint32_t servo_ping_timer = 0;
+#define SERVO_PIN 9
+Servo head_servo;
 
 /* -------------------------- *
  * LED strip global variables *
@@ -380,31 +363,6 @@ void updateIMU() {
 
 }
 
-void attach_turret()
-{
-    if (!attached) {
-        servo1.attach(YAW_PIN);
-        servo2.attach(AZIMUTH_PIN);
-        attached = true;
-    }
-}
-
-void detach_turret()
-{
-    if (attached) {
-        servo1.detach();
-        servo2.detach();
-        attached = false;
-    }
-}
-
-void set_yaw(int yaw) {
-    servo1.write(yaw);
-}
-
-void set_azimuth(int azimuth) {
-    servo2.write(azimuth);
-}
 
 void set_motor_speed(int motor_num)
 {
@@ -449,15 +407,9 @@ void set_motors(int speed1, int speed2, int speed3, int speed4)
     set_motor_goal(MOTOR4, speed4);  // bottom right
 }
 
-
 void ping() {
     ping_timer = millis();
 }
-
-void ping_turret() {
-    servo_ping_timer = millis();
-}
-
 
 void stop_motors() {
     set_motors(0, 0, 0, 0);
@@ -536,14 +488,9 @@ void loop()
             else if (command.charAt(0) == 'r') {  // release command
                 release_motors();
             }
-            else if (command.charAt(0) == 'c') {  // turret command
-                int yaw = command.substring(1, 4).toInt();
-                int azimuth = command.substring(4, 7).toInt();
-
-                attach_turret();
-                set_yaw(yaw);
-                set_azimuth(azimuth);
-                ping_turret();
+            else if (command.charAt(0) == 'c') {  // servo command
+                int servo_value = command.substring(1, 4).toInt();
+                head_servo.write(servo_value);
             }
             else if (command.charAt(0) == 'o') {  // pixel command
                 int led_num = command.substring(1, 4).toInt();
@@ -576,33 +523,34 @@ void loop()
                 fadeColors(0, 0, 0, r, g, b, cycle_num, SIGNAL_DELAY, SIGNAL_INCREMENT);
             }
             else if (command.charAt(0) == 'x') {  // show command
-                if (attached) {
-                    detach_turret();
-                    delay(50);
-                }
+                head_servo.detach();
+                delay(5);
                 strip.show();
+                delay(5);
+                head_servo.attach(SERVO_PIN);
             }
+        }
+        else if (status == 2) {  // start event
+            fadeColors(0, 0, 0, 0, 0, SIGNAL_COLOR, SIGNAL_CYCLES, SIGNAL_DELAY, SIGNAL_INCREMENT);
+
+            stop_motors();
+            head_servo.attach(SERVO_PIN);
+            rightEncoder.write(0);
+            leftEncoder.write(0);
+            oldLeftPosition = -1;
+            oldRightPosition = -1;
         }
         else if (status == 1) {  // stop event
             stop_motors();
             release_motors();
-            detach_turret();
+            head_servo.detach();
+
             for (int index = 0; index < NUM_LEDS; index++) {
                 strip.setPixelColor(index, 0);
             }
             strip.show();
 
             fadeColors(0, 0, 0, SIGNAL_COLOR, 0, 0, SIGNAL_CYCLES, SIGNAL_DELAY, SIGNAL_INCREMENT);
-        }
-        else if (status == 2) {  // start event
-            fadeColors(0, 0, 0, 0, 0, SIGNAL_COLOR, SIGNAL_CYCLES, SIGNAL_DELAY, SIGNAL_INCREMENT);
-
-            stop_motors();
-            attach_turret();
-            rightEncoder.write(0);
-            leftEncoder.write(0);
-            oldLeftPosition = -1;
-            oldRightPosition = -1;
         }
     }
 
@@ -611,12 +559,6 @@ void loop()
         if ((millis() - ping_timer) > 500) {
             stop_motors();
             ping_timer = millis();
-        }
-
-        if (servo_ping_timer > millis())  servo_ping_timer = millis();
-        if (attached && (millis() - servo_ping_timer) > 750) {
-            detach_turret();
-            servo_ping_timer = millis();
         }
 
         updateMotors();

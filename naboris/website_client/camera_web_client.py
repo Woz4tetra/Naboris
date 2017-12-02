@@ -12,9 +12,9 @@ from atlasbuggy import Node
 from atlasbuggy.opencv import ImageMessage
 
 
-class NaborisSocketClient(Node):
+class CameraWebsiteClient(Node):
     def __init__(self, width=640, height=480, address=("10.76.76.1", 80), enabled=True):
-        super(NaborisSocketClient, self).__init__(enabled)
+        super(CameraWebsiteClient, self).__init__(enabled)
         self.address = address
 
         self.buffer = b''
@@ -22,7 +22,6 @@ class NaborisSocketClient(Node):
         self.width = width
         self.height = height
         self.num_frames = 0
-        self.current_frame_num = 0
 
         self.reader = None
         self.writer = None
@@ -54,7 +53,7 @@ class NaborisSocketClient(Node):
     async def loop(self):
         headers = {
             'Content-type': 'image/jpeg',
-            'Authorization' : 'Basic %s' %  self.credentials
+            'Authorization' : 'Basic %s' % self.credentials
         }
         self.connection.request("GET", "/api/robot/rightcam_time", headers=headers)
         response = self.connection.getresponse()
@@ -89,13 +88,13 @@ class NaborisSocketClient(Node):
                 self.buffer = self.buffer[timestamp_index:]
                 image = self.to_image(jpg)
 
-                message = ImageMessage(image, self.current_frame_num, timestamp=timestamp)
+                message = ImageMessage(image, self.num_frames, timestamp=timestamp)
                 self.log_to_buffer(time.time(), "Web socket image received: %s" % message)
-                self.logger.info("Web socket image received: %s" % message)
+                self.check_buffer(self.num_frames)
+                # self.logger.info("Web socket image received: %s" % message)
 
                 await self.broadcast(message)
 
-                self.current_frame_num += 1
                 self.num_frames += 1
             await asyncio.sleep(0.0)
 
