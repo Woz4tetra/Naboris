@@ -52,6 +52,8 @@ imu::Vector<3> linaccel;
  * Motor shield global variables *
  * ----------------------------- */
 
+// #define ENABLE_MOTOR_TIMEOUT_PINGS
+
  // Create the motor shield object with the default I2C address
  Adafruit_MotorShield AFMS = Adafruit_MotorShield();
  // Or, create it with a different I2C address (say for stacking)
@@ -127,7 +129,9 @@ int signal_r, signal_g, signal_b = 0;
  * General global variables *
  * ------------------------ */
 
+#ifdef ENABLE_MOTOR_TIMEOUT_PINGS
 uint32_t ping_timer = millis();
+#endif
 
 #define INIT_DATA_BUF_SIZE 255
 
@@ -407,9 +411,11 @@ void set_motors(int speed1, int speed2, int speed3, int speed4)
     set_motor_goal(MOTOR4, speed4);  // bottom right
 }
 
+#ifdef ENABLE_MOTOR_TIMEOUT_PINGS
 void ping() {
     ping_timer = millis();
 }
+#endif
 
 void stop_motors() {
     set_motors(0, 0, 0, 0);
@@ -451,17 +457,27 @@ void updateEncoders()
     newLeftPosition = leftEncoder.read();
 
     if (newRightPosition != oldRightPosition) {
-        snprintf(r_enc_print_buffer, R_ENC_BUF_LEN, "er%lu\t%li\n", enc_time, newRightPosition);
+        // snprintf(r_enc_print_buffer, R_ENC_BUF_LEN, "er%lu\t%li\n", enc_time, newRightPosition);
 
         oldRightPosition = newRightPosition;
-        Serial.print(r_enc_print_buffer);
+        Serial.print("er");
+        Serial.print(enc_time);
+        Serial.print('\t');
+        Serial.print(newRightPosition);
+        Serial.print('\n');
+        // Serial.print(r_enc_print_buffer);
     }
 
     if (newLeftPosition != oldLeftPosition) {
-        snprintf(l_enc_print_buffer, L_ENC_BUF_LEN, "el%lu\t%li\n", enc_time, newLeftPosition);
+        // snprintf(l_enc_print_buffer, L_ENC_BUF_LEN, "el%lu\t%li\n", enc_time, newLeftPosition);
 
         oldLeftPosition = newLeftPosition;
-        Serial.print(l_enc_print_buffer);
+        Serial.print("el");
+        Serial.print(enc_time);
+        Serial.print('\t');
+        Serial.print(newLeftPosition);
+        Serial.print('\n');
+        // Serial.print(l_enc_print_buffer);
     }
 }
 
@@ -479,7 +495,9 @@ void loop()
                 int m4 = command.substring(13, 17).toInt();
 
                 set_motors(m1, m2, m3, m4);
+                #ifdef ENABLE_MOTOR_TIMEOUT_PINGS
                 ping();
+                #endif
             }
 
             else if (command.charAt(0) == 'h') {  // stop command
@@ -555,11 +573,13 @@ void loop()
     }
 
     if (!robot.isPaused()) {
+        #ifdef ENABLE_MOTOR_TIMEOUT_PINGS
         if (ping_timer > millis())  ping_timer = millis();
         if ((millis() - ping_timer) > 500) {
             stop_motors();
             ping_timer = millis();
         }
+        #endif
 
         updateMotors();
         updateEncoders();

@@ -1,3 +1,4 @@
+import re
 import time
 import asyncio
 
@@ -63,6 +64,9 @@ class HardwareInterface(Arduino):
         self.left_updated = False
         self.enc_packet_num = 0
 
+        self.right_encoder_regex = r"er([\-\d]*)\t([\-\d]*)"
+        self.left_encoder_regex = r"el([\-\d]*)\t([\-\d]*)"
+
         self.encoder_service = "encoder"
         self.define_service(self.encoder_service, message_type=EncoderMessage)
 
@@ -114,52 +118,49 @@ class HardwareInterface(Arduino):
         self.logger.info("Number of leds: %s" % self.num_leds)
 
     async def receive(self, packet_time, packet):
-        if packet[0] == "e":
-            header = packet[1]
-            data = packet[2:]
-            if header == "r":
-                encoder_time, self.right_tick = data.split("\t")
-                self.right_tick = -int(self.right_tick)  # right encoder reversed
-                self.right_updated = True
+        match = re.match(self.right_encoder_regex, packet)
+        if match is not None:
+            encoder_time = int(match.group(1))
+            self.right_tick = -int(match.group(2))  # right encoder reversed
+            self.right_updated = True
 
-            elif header == "l":
-                encoder_time, self.left_tick = data.split("\t")
-                self.left_tick = int(self.left_tick)
-                self.left_updated = True
+        match = re.match(self.left_encoder_regex, packet)
+        if match is not None:
+            encoder_time = int(match.group(1))
+            self.left_tick = int(match.group(2))
+            self.left_updated = True
 
-            else:
-                raise ValueError("Invalid encoder header. Packet: %s" % packet)
+        if self.right_updated and self.left_updated:
+            encoder_time = float(encoder_time) / 1000
 
-            if self.right_updated and self.left_updated:
-                encoder_time = float(encoder_time) / 1000
+            delta_right = self.right_tick - self.prev_right_tick
+            delta_left = self.left_tick - self.prev_left_tick
 
-                delta_right = self.right_tick - self.prev_right_tick
-                delta_left = self.left_tick - self.prev_left_tick
+            self.log_to_buffer(time.time(), "right: %s, left: %s" % (self.right_tick, self.left_tick))
+            # print("right: %s, left: %s" % (self.right_tick, self.left_tick))
 
-                delta_dist = ticks_to_mm * (delta_right + delta_left) / 2
+            delta_dist = ticks_to_mm * (delta_right + delta_left) / 2
 
-                encoder_message = EncoderMessage(encoder_time, delta_dist)
-                self.enc_packet_num += 1
+            encoder_message = EncoderMessage(encoder_time, delta_dist, time.time(), self.enc_packet_num)
+            self.enc_packet_num += 1
 
-                self.log_to_buffer(packet_time, encoder_message)
-                await self.broadcast(encoder_message, self.encoder_service)
+            self.log_to_buffer(packet_time, encoder_message)
+            await self.broadcast(encoder_message, self.encoder_service)
 
-                self.right_updated = False
-                self.left_updated = False
+            self.right_updated = False
+            self.left_updated = False
 
-                self.prev_right_tick = self.right_tick
-                self.prev_left_tick = self.left_tick
+            self.prev_right_tick = self.right_tick
+            self.prev_left_tick = self.left_tick
 
 
-        elif packet.startswith(self.bno055_packet_header):
+        if packet.startswith(self.bno055_packet_header):
             message = self.bno055.parse_packet(packet_time, packet, self.bno055_packet_num)
 
             self.log_to_buffer(packet_time, message)
             self.bno055_packet_num += 1
             await self.broadcast(message, self.bno055_service)
 
-        else:
-            raise ValueError("Unrecognized packet type: %s" % packet)
 
     def drive(self, speed=0, angle=0, angular=0):
         self.commanded_angle = angle % 360

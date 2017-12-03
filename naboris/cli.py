@@ -77,7 +77,8 @@ class NaborisCLI(Node):
             print("\r%s" % self.prompt_text, end="")
             data = await self.queue.get()
             try:
-                self.handle_input(data.strip('\n'))
+                for command in data.split(";"):
+                    self.handle_input(command.strip())
             except BaseException as error:
                 traceback.print_exc()
                 print(error)
@@ -202,13 +203,13 @@ class NaborisCLI(Node):
 
         if len(data) == 1:
             theta = float(data[0])
-            print("going to angle: %sdeg" % theta)
+            print("Entered angle: %sdeg" % theta)
             theta = math.radians(theta)
         else:
             if len(data) >= 2:
                 x = float(data[0])
                 y = float(data[1])
-                print("going to %0.4fmm, %0.4fmm" % (x, y), end="")
+                print("Entered %0.4fmm, %0.4fmm" % (x, y), end="")
             if len(data) >= 3:
                 theta = float(data[2])
                 print(", %0.4fdeg" % theta, end="")

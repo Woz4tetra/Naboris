@@ -8,12 +8,12 @@ from naboris.odometry import Odometry
 from naboris.website_client import CameraWebsiteClient
 from naboris.picamera import PiCamera
 
-log = False
+log = True
 
 
 class NaborisOrchestrator(Orchestrator):
     def __init__(self, event_loop):
-        self.set_default(write=log, level=20)
+        self.set_default(write=log, level=30)
         super(NaborisOrchestrator, self).__init__(event_loop)
 
         self.hardware = HardwareInterface()
