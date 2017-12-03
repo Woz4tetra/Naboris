@@ -50,6 +50,7 @@ class NaborisCLI(Node):
             goto=self.goto_pos,
             cancel=self.cancel_goto_pos,
             reset=self.reset_odometry,
+            pos=self.print_current_pos,
             look=self.look,
             s=self.my_stop,
             red=self.red,
@@ -129,7 +130,7 @@ class NaborisCLI(Node):
         elif params == "up":
             self.hardware.look_up()
         else:
-            self.hardware.set_servo(params)
+            self.hardware.set_servo(int(params))
 
     def rgb(self, params):
         r, g, b = [int(x) for x in params.split(" ")]
@@ -217,6 +218,9 @@ class NaborisCLI(Node):
             print()
 
         self.guidance.goto(x, y, theta)
+
+    def print_current_pos(self, params):
+        print("x=%0.2f, y=%0.2f, theta=%0.4f" % (self.guidance.current_x, self.guidance.current_y, self.guidance.current_th))
 
     def cancel_goto_pos(self, params):
         self.guidance.cancel()
