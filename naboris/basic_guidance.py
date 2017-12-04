@@ -154,7 +154,7 @@ class BasicGuidance(Node):
             current_time = time.time()
             dt = current_time - prev_time
             prev_time = current_time
-            motor_power = self.angle_pid.update(angle_error, dt)
+            motor_power = -self.angle_pid.update(angle_error, dt)
             if abs(motor_power) < self.min_motor_power:
                 motor_power = math.copysign(self.min_motor_power, motor_power)
 
@@ -232,7 +232,7 @@ class BasicGuidance(Node):
             prev_time = current_time
 
             forward_power = int(self.dist_pid.update(dist_error, dt))
-            angle_power = int(self.angular_pid.update(angle_error, dt))
+            angle_power = -int(self.angular_pid.update(angle_error, dt))
 
             if abs(forward_power) < self.min_motor_power:
                 forward_power = math.copysign(self.min_motor_power, forward_power)

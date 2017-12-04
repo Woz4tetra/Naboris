@@ -25,6 +25,7 @@ class NaborisCLI(Node):
                 "look_down",
                 "set_all_leds",
                 "stop_motors",
+                "rainbow"
             )
         )
         self.hardware = None
@@ -58,6 +59,7 @@ class NaborisCLI(Node):
             blue=self.blue,
             white=self.white,
             rgb=self.rgb,
+            rainbow=self.rainbow,
             hello=self.say_hello,
             alert=self.say_alert,
             sound=self.say_random_sound,
@@ -151,6 +153,9 @@ class NaborisCLI(Node):
     def white(self, params):
         value = int(params) if len(params) > 0 else 15
         self.hardware.set_all_leds(value, value, value)
+
+    def rainbow(self, params):
+        self.hardware.rainbow()
 
     def exit(self, params):
         self.should_exit = True

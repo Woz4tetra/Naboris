@@ -81,10 +81,7 @@ class HardwareInterface(Arduino):
 
         self.start()
 
-        self.set_all_leds(15, 15, 15)
-        self.pause(0.5)  # servos don't like being set at the same time as LEDs
         self.look_straight()
-
         while True:
             while not self.empty():
                 packet_time, packets = self.read()
@@ -285,3 +282,6 @@ class HardwareInterface(Arduino):
 
     def show(self):
         self.write("x")
+
+    def rainbow(self):
+        self.write("rainbow")
