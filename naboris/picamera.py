@@ -14,11 +14,11 @@ from atlasbuggy.opencv.messages import ImageMessage
 
 
 class PiCamera(Node):
-    def __init__(self, enabled=True, record=False, file_name=None, directory=None):
+    def __init__(self, width=None, height=None, enabled=True, record=False, file_name=None, directory=None):
         super(PiCamera, self).__init__(enabled)
 
-        self.width = 0
-        self.height = 0
+        self.width = width
+        self.height = height
         self.fps = 32
         self.capture = None
 
@@ -52,11 +52,13 @@ class PiCamera(Node):
 
         # self.capture.resolution = (self.capture.resolution[0] // 2, self.capture.resolution[1] // 2)
         self.capture.framerate = self.fps
-        self.capture.hflip = True
-        self.capture.vflip = True
+        # self.capture.hflip = True
+        # self.capture.vflip = True
 
-        self.width = self.capture.resolution[0]
-        self.height = self.capture.resolution[1]
+        self.width = self.capture.resolution[0] if self.width is None else self.width
+        self.height = self.capture.resolution[1] if self.height is None else self.height
+
+        self.capture.resolution = (self.width, self.height)
 
         self.logger.info("PiCamera initialized! w=%s, h=%s, fps=%s" % (self.width, self.height, self.fps))
 
@@ -144,7 +146,7 @@ class PiCamera(Node):
             raw_capture = PiRGBArray(self.capture, size=self.capture.resolution)
             # stream = io.BytesIO()
             for frame in self.capture.capture_continuous(raw_capture, format="bgr", use_video_port=True):
-            # for frame in self.capture.capture_continuous(stream, format="jpeg", use_video_port=True):
+                # for frame in self.capture.capture_continuous(stream, format="jpeg", use_video_port=True):
 
                 # stream.seek(0)
                 # self.frame = stream.read()
@@ -166,7 +168,6 @@ class PiCamera(Node):
                     continue
             self.logger.debug("Closing capture")
         self.logger.debug("Closed")
-
 
     def poll_for_fps(self):
         if self.prev_t is None:
