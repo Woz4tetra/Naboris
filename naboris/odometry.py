@@ -102,13 +102,13 @@ class Odometry(Node):
                     while not self.bno055_queue.empty():
                         bno055_message = await self.bno055_queue.get()
                         if self.start_angle is None:
-                            self.start_angle = bno055_message.euler.z
+                            self.start_angle = 2 * math.pi - bno055_message.euler.z
 
                         self.num_bno_messages += 1
 
                     self.num_used_bno_messages += 1
 
-                    current_angle = bno055_message.euler.z - self.start_angle
+                    current_angle = 2 * math.pi - bno055_message.euler.z - self.start_angle
                     if current_angle - self.prev_angle > math.pi:
                         current_angle -= 2 * math.pi
                     delta_angle = current_angle - self.prev_angle

@@ -481,6 +481,33 @@ void updateEncoders()
     }
 }
 
+// Input a value 0 to 255 to get a color value.
+// The colours are a transition r - g - b - back to r.
+uint32_t Wheel(byte WheelPos) {
+    WheelPos = 255 - WheelPos;
+    if(WheelPos < 85) {
+        return strip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
+    }
+    if(WheelPos < 170) {
+        WheelPos -= 85;
+        return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
+    }
+    WheelPos -= 170;
+    return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+}
+
+void rainbowCycle(uint8_t wait) {
+    uint16_t i, j;
+
+    for(j=0; j<256*5; j++) { // 5 cycles of all colors on wheel
+        for(i=0; i< strip.numPixels(); i++) {
+            strip.setPixelColor(i, Wheel(((i * 256 / strip.numPixels()) + j) & 255));
+        }
+        strip.show();
+        delay(wait);
+    }
+}
+
 void loop()
 {
     while (robot.available())
@@ -502,6 +529,17 @@ void loop()
 
             else if (command.charAt(0) == 'h') {  // stop command
                 stop_motors();
+            }
+            else if (command.equals("rainbow")) {
+                stop_motors();
+                head_servo.detach();
+                delay(5);
+
+                rainbowCycle(1);
+                setColor(strip.Color(1, 1, 1));
+
+                delay(5);
+                head_servo.attach(SERVO_PIN);
             }
             else if (command.charAt(0) == 'r') {  // release command
                 release_motors();
@@ -550,6 +588,7 @@ void loop()
         }
         else if (status == 2) {  // start event
             fadeColors(0, 0, 0, 0, 0, SIGNAL_COLOR, SIGNAL_CYCLES, SIGNAL_DELAY, SIGNAL_INCREMENT);
+            setColor(strip.Color(1, 1, 1));
 
             stop_motors();
             head_servo.attach(SERVO_PIN);

@@ -45,11 +45,12 @@ class BasicGuidance(Node):
         # self.angle_pid = PID(120.0, 20.0, 0.0)  # solid
         self.angle_pid = PID(250.0, 50.0, 0.0)  # carpet
         self.dist_pid = PID(1.0, 0.0, 0.0)
-        self.angular_pid = PID(200.0, 50.0, 0.0)
+        # self.angular_pid = PID(120.0, 20.0, 0.0)  # solid
+        self.angular_pid = PID(200.0, 50.0, 0.0)  # carpet
 
         self.refresh_rate = 0.003  # how rapidly the controller should update in seconds (approximate)
         self.dist_error = 5.0  # stopping condition for distance (mm)
-        self.angle_error = 0.005  # stopping condition for angle (rad)
+        self.angle_error = 0.003  # stopping condition for angle (rad)
         self.pid_timeout = 15.0  # timeout condition (sec)
         self.min_motor_power = 45
 
@@ -97,6 +98,11 @@ class BasicGuidance(Node):
 
         self.goal_was_cancelled = False
         self.odometry_sub.enabled = True
+
+        pose_message = await self.odometry_queue.get()
+        self.current_x = pose_message.x_mm
+        self.current_y = pose_message.y_mm
+        self.current_th = pose_message.theta_rad
 
     def convert_angle_range(self, angle_error):
         """Convert an angle to a -pi...pi range"""
@@ -148,7 +154,7 @@ class BasicGuidance(Node):
             current_time = time.time()
             dt = current_time - prev_time
             prev_time = current_time
-            motor_power = self.angle_pid.update(angle_error, dt)
+            motor_power = -self.angle_pid.update(angle_error, dt)
             if abs(motor_power) < self.min_motor_power:
                 motor_power = math.copysign(self.min_motor_power, motor_power)
 
@@ -219,21 +225,21 @@ class BasicGuidance(Node):
                 self.goal_x - self.current_x, self.goal_y - self.current_y, goal_th
             )
 
-            angle_error = -self.convert_angle_range(goal_th - self.current_th)
+            angle_error = self.convert_angle_range(goal_th - self.current_th)
 
             current_time = time.time()
             dt = current_time - prev_time
             prev_time = current_time
 
             forward_power = int(self.dist_pid.update(dist_error, dt))
-            angle_power = int(self.angular_pid.update(angle_error, dt))
+            angle_power = -int(self.angular_pid.update(angle_error, dt))
 
             if abs(forward_power) < self.min_motor_power:
                 forward_power = math.copysign(self.min_motor_power, forward_power)
 
             # apply forward/backward motor power (-255...255) depending on the distance error
             if forward_power != prev_forward_power or angle_power != prev_angle_power:
-                self.hardware.drive(forward_power, angle_power)
+                self.hardware.drive(forward_power, -angle_power, angle_power)
                 prev_forward_power = forward_power
                 prev_angle_power = angle_power
 
@@ -267,6 +273,9 @@ class BasicGuidance(Node):
         self.goal_was_cancelled = True
         self.odometry_sub.enabled = False
         self.hardware.stop_motors()
+
+        while not self.odometry_queue.empty():
+            self.odometry_queue.get_nowait()
 
     def cancel(self):
         """Cancel a goal request"""

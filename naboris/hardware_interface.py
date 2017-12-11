@@ -81,10 +81,7 @@ class HardwareInterface(Arduino):
 
         self.start()
 
-        self.set_all_leds(15, 15, 15)
-        await asyncio.sleep(0.1)  # servos don't like being set at the same time as LEDs
         self.look_straight()
-
         while True:
             while not self.empty():
                 packet_time, packets = self.read()
@@ -211,13 +208,13 @@ class HardwareInterface(Arduino):
         self.write("c%03d" % int(servo_value % 181))
 
     def look_up(self):
-        self.set_servo(0)
+        self.set_servo(150)
 
     def look_down(self):
-        self.set_servo(180)
+        self.set_servo(84)
 
     def look_straight(self):
-        self.set_servo(90)
+        self.set_servo(100)
 
     @staticmethod
     def constrain_value(value):
@@ -283,3 +280,6 @@ class HardwareInterface(Arduino):
 
     def show(self):
         self.write("x")
+
+    def rainbow(self):
+        self.write("rainbow")
