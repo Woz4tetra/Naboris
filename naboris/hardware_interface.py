@@ -153,14 +153,12 @@ class HardwareInterface(Arduino):
             self.prev_right_tick = self.right_tick
             self.prev_left_tick = self.left_tick
 
-
         if packet.startswith(self.bno055_packet_header):
             message = self.bno055.parse_packet(packet_time, packet, self.bno055_packet_num)
 
             self.log_to_buffer(packet_time, message)
             self.bno055_packet_num += 1
             await self.broadcast(message, self.bno055_service)
-
 
     def drive(self, speed=0, angle=0, angular=0):
         self.commanded_angle = angle % 360
@@ -191,7 +189,7 @@ class HardwareInterface(Arduino):
             fraction_speed = 2 * speed / 90 * (angle - 270) - speed
             self.command_motors(fraction_speed + angular, speed - angular, speed + angular, fraction_speed - angular)
 
-        # self.logger.info("speed=%s, angle=%s, angular=%s" % (speed, angle, angular))
+            # self.logger.info("speed=%s, angle=%s, angular=%s" % (speed, angle, angular))
 
     def spin(self, speed):
         self.drive(angular=speed)
