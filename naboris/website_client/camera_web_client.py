@@ -19,6 +19,9 @@ class CameraWebsiteClient(Node):
 
         self.buffer = b''
 
+        self.requested_width = width
+        self.requested_height = height
+
         self.width = width
         self.height = height
         self.num_frames = 0
@@ -29,7 +32,7 @@ class CameraWebsiteClient(Node):
         self.connection = None
         self.response_lock = Lock()
 
-        self.chunk_size = int(self.width * self.height / 16)
+        self.chunk_size = int(self.width * self.height / 8)
 
         self.fps = 30.0
         self.length_sec = 0.0
@@ -91,7 +94,8 @@ class CameraWebsiteClient(Node):
                 message = ImageMessage(image, self.num_frames, timestamp=timestamp)
                 self.log_to_buffer(time.time(), "Web socket image received: %s" % message)
                 self.check_buffer(self.num_frames)
-                # self.logger.info("Web socket image received: %s" % message)
+
+                print("image time diff: %s" % (time.time() - timestamp))
 
                 await self.broadcast(message)
 
@@ -112,7 +116,8 @@ class CameraWebsiteClient(Node):
                 raise RuntimeError("Response was not OK: %s, %s" % (response.status, response.reason))
 
     def to_image(self, byte_stream):
-        return cv2.imdecode(np.fromstring(byte_stream, dtype=np.uint8), 1)
+        image = cv2.imdecode(np.fromstring(byte_stream, dtype=np.uint8), 1)
+        return cv2.resize(image, (self.requested_width, self.requested_height))
 
     def poll_for_fps(self):
         if self.prev_t is None:

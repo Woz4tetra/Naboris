@@ -1,3 +1,4 @@
+import time
 import asyncio
 
 from atlasbuggy import Node
@@ -5,68 +6,86 @@ from atlasbuggy.opencv.messages import StereoImageMessage
 
 
 class StereoCam(Node):
-    def __init__(self, cam_separation_dist, enabled=True, camera2_is_slow=True, camera1_is_left=True,
-                 time_diff=0.001):
+    def __init__(self, cam_separation_dist, enabled=True, fast_cam_is_left=True,
+                 time_diff=0.1):
         super(StereoCam, self).__init__(enabled)
 
-        self.camera1_tag = "camera1"
-        self.camera1_sub = self.define_subscription(self.camera1_tag)
-        self.camera1_queue = None
+        self.fast_cam_tag = "fast_cam"
+        self.fast_cam_sub = self.define_subscription(self.fast_cam_tag)
+        self.fast_cam_queue = None
 
-        self.camera2_tag = "camera2"
-        self.camera2_sub = self.define_subscription(self.camera2_tag)
-        self.camera2_queue = None
+        self.slow_cam_tag = "slow_cam"
+        self.slow_cam_sub = self.define_subscription(self.slow_cam_tag)
+        self.slow_cam_queue = None
 
         self.cam_separation_dist = cam_separation_dist
         self.time_diff = time_diff
-        self.camera2_is_slow = camera2_is_slow
-        self.camera1_is_left = camera1_is_left
-        self.slow_cam_is_left = camera1_is_left and camera2_is_slow
-        self.slow_camera_buffer = []
-        self.fast_camera_message = None
+        self.fast_cam_is_left = fast_cam_is_left
+        self.fast_camera_buffer = []
+        self.slow_camera_message = None
+
+        self.fps = 30.0
+        self.length_sec = 0.0
+        self.fps_sum = 0.0
+        self.fps_avg = 0.0
+        self.prev_t = None
+        self.num_frames = 0
 
     def take(self):
-        self.camera1_queue = self.camera1_sub.get_queue()
-        self.camera2_queue = self.camera2_sub.get_queue()
+        self.fast_cam_queue = self.fast_cam_sub.get_queue()
+        self.slow_cam_queue = self.slow_cam_sub.get_queue()
 
     async def loop(self):
         message_counter = 0
         while True:
-            while not self.camera1_queue.empty():
-                if not self.camera2_is_slow:
-                    self.slow_camera_buffer.append(await self.camera1_queue.get())
+            self.fast_camera_buffer.append(await self.fast_cam_queue.get())
+            while not self.slow_cam_queue.empty():
+                self.slow_camera_message = await self.slow_cam_queue.get()
+
+                match_index, matched_fast_message = min(
+                    enumerate(self.fast_camera_buffer),
+                    key=lambda element: abs(self.slow_camera_message.timestamp - element[1].timestamp)
+                )
+
+                message_time_diff = matched_fast_message.timestamp - self.slow_camera_message.timestamp
+                if abs(message_time_diff) < self.time_diff:
+                    self.fast_camera_buffer = self.fast_camera_buffer[
+                                              match_index:]  # eliminate all images before the index
+
+                    if self.fast_cam_is_left:
+                        right_message = matched_fast_message
+                        left_message = self.slow_camera_message
+                    else:
+                        left_message = matched_fast_message
+                        right_message = self.slow_camera_message
+
+                    stereo_message = StereoImageMessage(
+                        left_message.image, right_message.image, message_counter, self.cam_separation_dist,
+                        left_timestamp=left_message.timestamp, right_timestamp=right_message.timestamp
+                    )
+                    self.log_to_buffer(time.time(), stereo_message)
+                    self.check_buffer(message_counter)
+                    self.log_to_buffer(time.time(), "slow message diff: %s" % (
+                        self.slow_camera_message.timestamp - self.fast_camera_buffer[-1].timestamp)
+                    )
+                    message_counter += 1
+                    await self.broadcast(stereo_message)
+                    self.poll_for_fps()
                 else:
-                    self.fast_camera_message = await self.camera1_queue.get()
-                    assert self.camera1_queue.empty()
+                    self.logger.warning(
+                        "Time difference abs(%ss) is greater than %ss" % (message_time_diff, self.time_diff))
 
-            while not self.camera2_queue.empty():
-                if self.camera2_is_slow:
-                    self.slow_camera_buffer.append(await self.camera2_queue.get())
-                else:
-                    self.fast_camera_message = await self.camera2_queue.get()
-                    assert self.camera2_queue.empty()
+            await asyncio.sleep(0.01)
 
-            match_index, slow_cam_message = min(
-                enumerate(self.slow_camera_buffer),
-                lambda image_message: self.fast_camera_message.timestamp - image_message.timestamp
-            )
-            message_time_diff = self.fast_camera_message.timestamp - slow_cam_message.timestamp
-            if abs(message_time_diff) < self.time_diff:
-                self.slow_camera_buffer = self.slow_camera_buffer[
-                                          match_index + 1:]  # eliminate all images before the index
+    def poll_for_fps(self):
+        if self.prev_t is None:
+            self.prev_t = time.time()
+            return 0.0
 
-                if self.slow_cam_is_left:
-                    left_image = slow_cam_message.image
-                    right_image = self.fast_camera_message.image
-                else:
-                    right_image = slow_cam_message.image
-                    left_image = self.fast_camera_message.image
+        self.length_sec = time.time() - self.start_time
+        self.num_frames += 1
+        self.fps_sum += 1 / (time.time() - self.prev_t)
+        self.fps_avg = self.fps_sum / self.num_frames
+        self.prev_t = time.time()
 
-                stereo_message = StereoImageMessage(left_image, right_image, message_counter, self.cam_separation_dist)
-                message_counter += 1
-
-                await self.broadcast(stereo_message)
-            else:
-                self.logger.warning(
-                    "Time difference abs(%ss) is greater than %ss" % (message_time_diff, self.time_diff))
-                await asyncio.sleep(0.01)
+        self.fps = self.fps_avg

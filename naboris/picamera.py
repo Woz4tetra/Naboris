@@ -137,7 +137,7 @@ class PiCamera(Node):
     def run(self):
         with self.capture:
             self.logger.info("Warming up camera")
-            self.capture.start_preview()
+            # self.capture.start_preview()
             time.sleep(2)
 
             if self.should_record:
