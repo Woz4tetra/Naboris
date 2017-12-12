@@ -17,6 +17,7 @@ class StereoStitcher(OpenCVPipeline):
     async def pipeline(self, message):
         return np.concatenate((message.left_image, message.right_image), axis=1)
 
+
 class OrbSlamOrchestrator(Orchestrator):
     def __init__(self, event_loop):
         self.set_default(write=True, level=20)
@@ -31,7 +32,6 @@ class OrbSlamOrchestrator(Orchestrator):
         self.orbslam2 = OrbslamNode(width, height, enabled=False)
 
         self.add_nodes(self.orbslam2, self.client, self.picamera, self.stereo_cam, self.viewer, self.stereo_sticher)
-
 
         self.subscribe(self.stereo_cam, self.stereo_sticher, self.stereo_sticher.capture_tag)
 
@@ -53,19 +53,4 @@ class OrbSlamOrchestrator(Orchestrator):
                 print("Orbslam not ready.")
                 await asyncio.sleep(0.75)
 
-
-class ClientCamOrchestrator(Orchestrator):
-    def __init__(self, event_loop):
-        self.set_default(write=False, level=20)
-        super(ClientCamOrchestrator, self).__init__(event_loop)
-
-        self.client = CameraWebsiteClient()
-        self.viewer = OpenCVViewer()
-
-        self.add_nodes(self.client, self.viewer)
-
-        self.subscribe(self.client, self.viewer, self.viewer.capture_tag)
-
-
-# run(OrbSlamOrchestrator)
-run(ClientCamOrchestrator)
+run(OrbSlamOrchestrator)
