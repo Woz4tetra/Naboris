@@ -6,7 +6,6 @@ import struct
 import asyncio
 import numpy as np
 import aioprocessing
-from threading import Lock
 from http.client import HTTPConnection
 
 from atlasbuggy import Node
@@ -93,7 +92,6 @@ class CameraWebsiteClient(Node):
                 buffer = buffer[timestamp_index:]
 
                 with self.image_lock:
-                    # self.image_queue.put((jpg, timestamp, width, height))
                     self.shared_list[0] = jpg
                     self.shared_list[1] = timestamp
                     self.shared_list[2] = width
@@ -127,12 +125,10 @@ class CameraWebsiteClient(Node):
             self.log_to_buffer(time.time(), "Web socket image received: %s" % message)
             self.check_buffer(self.num_frames)
 
-            print("1: image time diff: %s" % (time.time() - timestamp))
-
             await self.broadcast(message)
 
             self.poll_for_fps()
-            print("fps: %s" % self.fps)
+            self.log_to_buffer(time.time(), "image time diff: %s, fps: %s" % (time.time() - timestamp, self.fps))
             self.new_data_event.clear()
             await asyncio.sleep(0.01)
 
