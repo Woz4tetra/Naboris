@@ -56,7 +56,7 @@ class OrbSlamOrchestrator(Orchestrator):
 
 class ClientCamOrchestrator(Orchestrator):
     def __init__(self, event_loop):
-        self.set_default(write=False, level=30)
+        self.set_default(write=False, level=20)
         super(ClientCamOrchestrator, self).__init__(event_loop)
 
         self.client = CameraWebsiteClient()

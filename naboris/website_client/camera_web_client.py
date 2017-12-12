@@ -65,6 +65,7 @@ class CameraWebsiteClient(Node):
             if len(resp) == 0:
                 return
 
+            #TODO: change so that only the latest image in the buffer is grabbed
             self.buffer += resp
             response_1 = self.buffer.find(b'\xff\xd8')
             response_2 = self.buffer.find(b'\xff\xd9')
@@ -76,6 +77,7 @@ class CameraWebsiteClient(Node):
                 height_index = width_index + 2
 
                 jpg = self.buffer[response_1:response_2]
+                print(response_1, response_2, len(jpg))
                 timestamp = struct.unpack('d', self.buffer[response_2:timestamp_index])[0]
                 width = int.from_bytes(self.buffer[timestamp_index:width_index], 'big')
                 height = int.from_bytes(self.buffer[width_index:height_index], 'big')
