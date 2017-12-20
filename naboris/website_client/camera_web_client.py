@@ -13,7 +13,7 @@ from atlasbuggy.opencv.messages import ImageMessage
 
 
 class CameraWebsiteClient(Node):
-    def __init__(self, width=640, height=480, address=("10.76.76.1", 80), enabled=True):
+    def __init__(self, width, height, address=("10.76.76.1", 80), enabled=True):
         super(CameraWebsiteClient, self).__init__(enabled)
         # http://user:something@10.76.76.1/api/robot/rightcam
 
@@ -65,6 +65,10 @@ class CameraWebsiteClient(Node):
         response = connection.getresponse()
 
         buffer = b''
+        timestamp_len = 8
+        width_len = 2
+        height_len = 2
+
         for resp in self.recv(response):
             if len(resp) == 0:
                 self.logger.info("Response ended. Closing.")
@@ -80,16 +84,18 @@ class CameraWebsiteClient(Node):
 
             if response_1 != -1 and response_2 != -1:
                 response_2 += 2
-                timestamp_index = response_2 + 8
-                width_index = timestamp_index + 2
-                height_index = width_index + 2
+                timestamp_index = response_2 + timestamp_len
+                width_index = timestamp_index + width_len
+                height_index = width_index + height_len
+                if height_index >= len(buffer):
+                    continue
 
                 jpg = buffer[response_1:response_2]
                 timestamp = struct.unpack('d', buffer[response_2:timestamp_index])[0]
                 width = int.from_bytes(buffer[timestamp_index:width_index], 'big')
                 height = int.from_bytes(buffer[width_index:height_index], 'big')
 
-                buffer = buffer[timestamp_index:]
+                buffer = buffer[height_index:]
 
                 with self.image_lock:
                     self.shared_list[0] = jpg
@@ -111,15 +117,19 @@ class CameraWebsiteClient(Node):
                 return
             with self.image_lock:
                 jpg, timestamp, width, height = self.shared_list
-            if width != self.width:
-                self.logger.info("Size changed to %s, %s" % (width, height))
-                self.width = width
-
-            if height != self.height:
-                self.logger.info("Size changed to %s, %s" % (width, height))
-                self.height = height
 
             image = self.to_image(jpg)
+
+            if width != self.width or height != self.height:
+                image = cv2.resize(image, (self.requested_width, self.requested_height))
+
+                if width != self.width:
+                    self.logger.info("Size changed to %s, %s" % (width, height))
+                    self.width = width
+
+                if height != self.height:
+                    self.logger.info("Size changed to %s, %s" % (width, height))
+                    self.height = height
 
             message = ImageMessage(image, self.num_frames, timestamp=timestamp)
             self.log_to_buffer(time.time(), "Web socket image received: %s" % message)
@@ -133,8 +143,7 @@ class CameraWebsiteClient(Node):
             await asyncio.sleep(0.01)
 
     def to_image(self, byte_stream):
-        image = cv2.imdecode(np.fromstring(byte_stream, dtype=np.uint8), 1)
-        return cv2.resize(image, (self.requested_width, self.requested_height))
+        return cv2.imdecode(np.fromstring(byte_stream, dtype=np.uint8), 1)
 
     def poll_for_fps(self):
         if self.prev_t is None:

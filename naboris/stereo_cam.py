@@ -2,12 +2,12 @@ import time
 import asyncio
 
 from atlasbuggy import Node
-from atlasbuggy.opencv.messages import StereoImageMessage
+from atlasbuggy.opencv import OpenCVPipeline, StereoImageMessage
 
 
 class StereoCam(Node):
-    def __init__(self, cam_separation_dist, enabled=True, fast_cam_is_left=True,
-                 time_diff=0.1):
+    def __init__(self, cam_separation_dist, enabled=True, fast_cam_is_left=False,
+                 max_time_diff=0.1):
         super(StereoCam, self).__init__(enabled)
 
         self.fast_cam_tag = "fast_cam"
@@ -19,7 +19,7 @@ class StereoCam(Node):
         self.slow_cam_queue = None
 
         self.cam_separation_dist = cam_separation_dist
-        self.time_diff = time_diff
+        self.max_time_diff = max_time_diff
         self.fast_cam_is_left = fast_cam_is_left
         self.fast_camera_buffer = []
         self.slow_camera_message = None
@@ -47,10 +47,10 @@ class StereoCam(Node):
                     key=lambda element: abs(self.slow_camera_message.timestamp - element[1].timestamp)
                 )
 
-                message_time_diff = matched_fast_message.timestamp - self.slow_camera_message.timestamp
-                if abs(message_time_diff) < self.time_diff:
-                    self.fast_camera_buffer = self.fast_camera_buffer[
-                                              match_index:]  # eliminate all images before the index
+                message_max_time_diff = matched_fast_message.timestamp - self.slow_camera_message.timestamp
+                if abs(message_max_time_diff) < self.max_time_diff:
+                    # eliminate all images before the index
+                    self.fast_camera_buffer = self.fast_camera_buffer[match_index:]
 
                     if self.fast_cam_is_left:
                         right_message = matched_fast_message
@@ -73,7 +73,7 @@ class StereoCam(Node):
                     self.poll_for_fps()
                 else:
                     self.logger.warning(
-                        "Time difference abs(%ss) is greater than %ss" % (message_time_diff, self.time_diff))
+                        "Time difference abs(%ss) is greater than %ss" % (message_max_time_diff, self.max_time_diff))
 
             await asyncio.sleep(0.01)
 
@@ -89,3 +89,10 @@ class StereoCam(Node):
         self.prev_t = time.time()
 
         self.fps = self.fps_avg
+
+class StereoStitcher(OpenCVPipeline):
+    def __init__(self, enabled=True):
+        super(StereoStitcher, self).__init__(enabled)
+
+    async def pipeline(self, message):
+        return np.concatenate((message.left_image, message.right_image), axis=1)
