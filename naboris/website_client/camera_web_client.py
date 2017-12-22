@@ -6,6 +6,8 @@ import struct
 import asyncio
 import numpy as np
 import aioprocessing
+from PIL import Image
+from io import StringIO
 from http.client import HTTPConnection
 
 from atlasbuggy import Node
@@ -75,6 +77,10 @@ class CameraWebsiteClient(Node):
         self.wait_for_header(response)
         buffer = b''
 
+        prev_time = time.time()
+        num_frames = 0
+        sum_fps = 0
+
         while True:
             status, buffer = self.get_buffer(response, len(self.message_start_header))
 
@@ -116,13 +122,21 @@ class CameraWebsiteClient(Node):
                     self.exit_event.set()
                     raise RuntimeError("Response doesn't end with a newline! (%s)" % (buffer))
 
-                with self.image_lock:
-                    self.shared_list[0] = frame
-                    self.shared_list[1] = timestamp
-                    self.shared_list[2] = width
-                    self.shared_list[3] = height
-                    self.new_data_event.set()
+                # with self.image_lock:
+                self.image_queue.put((frame, timestamp, width, height))
+                # self.shared_list[0] = frame
+                # self.shared_list[1] = timestamp
+                # self.shared_list[2] = width
+                # self.shared_list[3] = height
+                # self.new_data_event.set()
 
+                current_time = time.time()
+                dt = current_time - prev_time
+                prev_time = current_time
+                sum_fps += 1 / dt
+                num_frames += 1
+
+                self.logger.info("avg fps: %s" % (sum_fps / num_frames))
             else:
                 self.exit_event.set()
                 raise RuntimeError("Response doesn't match header (received %s != %s)" % (buffer, self.message_start_header))
@@ -156,6 +170,35 @@ class CameraWebsiteClient(Node):
 
     async def loop(self):
         while True:
+            if self.exit_event.is_set():
+                self.logger.info("Exit event set. Loop exiting.")
+                return
+            # with self.image_lock:
+            jpg, timestamp, width, height = await self.image_queue.coro_get()
+
+            image = self.to_image(jpg)
+
+            if width != self.width or height != self.height:
+                image = cv2.resize(image, (self.requested_width, self.requested_height))
+
+                if width != self.width:
+                    self.logger.info("Size changed to %s, %s" % (width, height))
+                    self.width = width
+
+                if height != self.height:
+                    self.logger.info("Size changed to %s, %s" % (width, height))
+                    self.height = height
+
+            message = ImageMessage(image, self.num_frames, timestamp=timestamp)
+            self.log_to_buffer(time.time(), "Web socket image received: %s" % message)
+            self.check_buffer(self.num_frames)
+
+            await self.broadcast(message)
+
+            self.poll_for_fps()
+
+    async def old_loop(self):
+        while True:
             await self.new_data_event.coro_wait()
             if self.exit_event.is_set():
                 return
@@ -182,12 +225,18 @@ class CameraWebsiteClient(Node):
             await self.broadcast(message)
 
             self.poll_for_fps()
-            self.log_to_buffer(time.time(), "image time diff: %s, fps: %s" % (time.time() - timestamp, self.fps))
+            # self.log_to_buffer(time.time(), "image time diff: %s, fps: %s" % (time.time() - timestamp, self.fps))
             self.new_data_event.clear()
             await asyncio.sleep(0.01)
 
     def to_image(self, byte_stream):
-        return cv2.imdecode(np.fromstring(byte_stream, dtype=np.uint8), 1)
+        t0 = time.time()
+        image = cv2.imdecode(np.fromstring(byte_stream, dtype=np.uint8), 1)
+        # image = cv2.imdecode(np.asarray(byte_stream, dtype=np.uint8), 1)
+        # image = np.array(Image.open(StringIO(byte_stream)))
+        t1 = time.time()
+        print(t1 - t0)
+        return image
 
     def poll_for_fps(self):
         if self.prev_t is None:

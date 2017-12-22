@@ -6,7 +6,7 @@ from naboris.website_client import CameraWebsiteClient
 
 class ClientCamOrchestrator(Orchestrator):
     def __init__(self, event_loop):
-        self.set_default(write=True, level=20)
+        self.set_default(write=True, level=10)
         super(ClientCamOrchestrator, self).__init__(event_loop)
 
         self.client = CameraWebsiteClient(720, 480)
