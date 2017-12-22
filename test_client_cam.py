@@ -9,8 +9,8 @@ class ClientCamOrchestrator(Orchestrator):
         self.set_default(write=True, level=20)
         super(ClientCamOrchestrator, self).__init__(event_loop)
 
-        self.client = CameraWebsiteClient()
-        self.viewer = OpenCVViewer(enabled=False)
+        self.client = CameraWebsiteClient(720, 480)
+        self.viewer = OpenCVViewer(enabled=True)
 
         self.add_nodes(self.client, self.viewer)
 

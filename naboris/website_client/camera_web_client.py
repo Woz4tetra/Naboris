@@ -32,7 +32,15 @@ class CameraWebsiteClient(Node):
         # self.connection = None
         # self.response_lock = Lock()
 
-        self.chunk_size = int(self.width * self.height / 8)
+        self.response_start_header = b'\xbb\x08'
+        self.message_start_header = b'\xde\xad\xbe\xef'
+        self.frame_len = 4
+        self.timestamp_len = 8
+        self.width_len = 2
+        self.height_len = 2
+        self.endian = 'big'
+
+        self.chunk_size = int(self.width * self.height / 2)
 
         self.fps = 30.0
         self.length_sec = 0.0
@@ -61,54 +69,90 @@ class CameraWebsiteClient(Node):
             'Content-type':  'image/jpeg',
             'Authorization': 'Basic %s' % self.credentials
         }
-        connection.request("GET", "/api/robot/rightcam_time", headers=headers)
+        connection.request("GET", "/api/robot/rightcam_meta", headers=headers)
         response = connection.getresponse()
 
+        self.wait_for_header(response)
         buffer = b''
-        timestamp_len = 8
-        width_len = 2
-        height_len = 2
 
-        for resp in self.recv(response):
-            if len(resp) == 0:
-                self.logger.info("Response ended. Closing.")
-                return
+        while True:
+            status, buffer = self.get_buffer(response, len(self.message_start_header))
 
-            if self.exit_event.is_set():
-                self.logger.info("Exit event set. Closing.")
-                return
+            if status: return
 
-            buffer += resp
-            response_1 = buffer.find(b'\xff\xd8')
-            response_2 = buffer.find(b'\xff\xd9')
+            if buffer == self.message_start_header:
+                status, buffer = self.get_buffer(response, self.frame_len)
 
-            if response_1 != -1 and response_2 != -1:
-                response_2 += 2
-                timestamp_index = response_2 + timestamp_len
-                width_index = timestamp_index + width_len
-                height_index = width_index + height_len
-                if height_index >= len(buffer):
-                    continue
+                if status: return
 
-                jpg = buffer[response_1:response_2]
-                timestamp = struct.unpack('d', buffer[response_2:timestamp_index])[0]
-                width = int.from_bytes(buffer[timestamp_index:width_index], 'big')
-                height = int.from_bytes(buffer[width_index:height_index], 'big')
+                frame_size = int.from_bytes(buffer, self.endian)
+                if frame_size > self.requested_width * self.requested_height:
+                    self.exit_event.set()
+                    raise RuntimeError("Frame size is larger than the expected amount (%s > %s). Exiting." % (
+                        frame_size, self.requested_width * self.requested_height)
+                    )
 
-                buffer = buffer[height_index:]
+                status, frame = self.get_buffer(response, frame_size)
+
+                if status: return
+
+                status, buffer = self.get_buffer(response, self.timestamp_len)
+                timestamp = struct.unpack('d', buffer)[0]
+
+                if status: return
+
+                status, buffer = self.get_buffer(response, self.width_len)
+                width = int.from_bytes(buffer, self.endian)
+
+                if status: return
+
+                status, buffer = self.get_buffer(response, self.height_len)
+                height = int.from_bytes(buffer, self.endian)
+
+                if status: return
+
+                buffer = response.read(2)
+                if buffer != b'\r\n':
+                    self.exit_event.set()
+                    raise RuntimeError("Response doesn't end with a newline! (%s)" % (buffer))
 
                 with self.image_lock:
-                    self.shared_list[0] = jpg
+                    self.shared_list[0] = frame
                     self.shared_list[1] = timestamp
                     self.shared_list[2] = width
                     self.shared_list[3] = height
                     self.new_data_event.set()
 
-    def recv(self, response):
-        buf = response.read(self.chunk_size)
-        while buf:
-            yield buf
-            buf = response.read(self.chunk_size)
+            else:
+                self.exit_event.set()
+                raise RuntimeError("Response doesn't match header (received %s != %s)" % (buffer, self.message_start_header))
+
+    def wait_for_header(self, response):
+        buffer = b''
+        while not self.exit_event.is_set():
+            char = response.read(1)
+            buffer += char
+            if len(buffer) > 100:
+                self.logger.error("Still searching for start header. Current response:", buffer)
+                buffer = b''
+
+            if char == self.response_start_header[0:1]:
+                char = response.read(1)
+                buffer += char
+                if char == self.response_start_header[1:2]:
+                    return
+
+    def get_buffer(self, response, length):
+        buffer = response.read(length)
+        if len(buffer) == 0:
+            self.logger.info("Response ended. Closing.")
+            return True, buffer
+
+        if self.exit_event.is_set():
+            self.logger.info("Exit event set. Closing.")
+            return True, buffer
+
+        return False, buffer
 
     async def loop(self):
         while True:
