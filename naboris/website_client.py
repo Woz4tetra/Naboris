@@ -14,9 +14,9 @@ from atlasbuggy import Node
 from atlasbuggy.opencv.messages import ImageMessage
 
 
-class CameraWebsiteClient(Node):
-    def __init__(self, width, height, address=("10.76.76.1", 80), enabled=True):
-        super(CameraWebsiteClient, self).__init__(enabled)
+class WebsiteClient(Node):
+    def __init__(self, width, height, address=("10.76.76.1", 80), enabled=True, enable_images=True):
+        super(WebsiteClient, self).__init__(enabled)
         # http://user:something@10.76.76.1/api/robot/rightcam
 
         self.address = address
@@ -31,8 +31,7 @@ class CameraWebsiteClient(Node):
         self.reader = None
         self.writer = None
 
-        # self.connection = None
-        # self.response_lock = Lock()
+        self.enable_images = enable_images
 
         self.response_start_header = b'\xbb\x08'
         self.message_start_header = b'\xde\xad\xbe\xef'
@@ -53,27 +52,41 @@ class CameraWebsiteClient(Node):
 
         self.credentials = base64.b64encode(b'robot:naboris').decode('ascii')
 
-        self.process = aioprocessing.AioProcess(target=self.retrieve_images)
-        self.manager = aioprocessing.AioManager()
-        self.shared_list = self.manager.list()
-        self.image_queue = aioprocessing.AioQueue()
-        self.image_lock = aioprocessing.AioLock()
-        self.exit_event = aioprocessing.AioEvent()
-        self.new_data_event = aioprocessing.AioEvent()
+        # self.manager = aioprocessing.AioSyncManager()
 
-    async def setup(self):
-        self.shared_list.extend([b'', 0.0, 0, 0])
-        self.process.start()
+        self.connection = HTTPConnection("%s:%s" % (self.address[0], self.address[1]))
 
-    def retrieve_images(self):
-        connection = HTTPConnection("%s:%s" % (self.address[0], self.address[1]))
-        headers = {
+        self.headers = {
             'Content-type':  'image/jpeg',
             'Authorization': 'Basic %s' % self.credentials
         }
-        connection.request("GET", "/api/robot/rightcam_meta", headers=headers)
-        response = connection.getresponse()
 
+        if self.enable_images:
+            self.connection.request("GET", "/api/robot/rightcam_meta", headers=self.headers)
+            response = self.connection.getresponse()
+        else:
+            response = None
+
+        self.image_process = aioprocessing.AioProcess(target=self.retrieve_images, args=(response,))
+        self.image_queue = aioprocessing.AioQueue()
+
+        self.connection.request("GET", "/cmd", headers=self.headers)
+        response = self.connection.getresponse()
+
+        self.command_process = aioprocessing.AioProcess(target=self.retrieve_commands, args=(response,))
+        self.command_queue = aioprocessing.AioQueue()
+
+        self.exit_event = aioprocessing.AioEvent()
+
+        self.command_service_tag = "commands"
+        self.define_service(self.command_service_tag, str)
+
+    async def setup(self):
+        if self.enable_images:
+            self.image_process.start()
+        self.command_process.start()
+
+    def retrieve_images(self, response):
         self.wait_for_header(response)
         buffer = b''
 
@@ -122,13 +135,7 @@ class CameraWebsiteClient(Node):
                     self.exit_event.set()
                     raise RuntimeError("Response doesn't end with a newline! (%s)" % (buffer))
 
-                # with self.image_lock:
                 self.image_queue.put((frame, timestamp, width, height))
-                # self.shared_list[0] = frame
-                # self.shared_list[1] = timestamp
-                # self.shared_list[2] = width
-                # self.shared_list[3] = height
-                # self.new_data_event.set()
 
                 current_time = time.time()
                 dt = current_time - prev_time
@@ -173,64 +180,81 @@ class CameraWebsiteClient(Node):
             if self.exit_event.is_set():
                 self.logger.info("Exit event set. Loop exiting.")
                 return
-            # with self.image_lock:
-            jpg, timestamp, width, height = await self.image_queue.coro_get()
 
-            image = self.to_image(jpg)
+            if self.enable_images:
+                jpg, timestamp, width, height = await self.image_queue.coro_get()
 
-            if width != self.width or height != self.height:
-                image = cv2.resize(image, (self.requested_width, self.requested_height))
+                image = self.to_image(jpg)
 
-                if width != self.width:
-                    self.logger.info("Size changed to %s, %s" % (width, height))
-                    self.width = width
+                if width != self.width or height != self.height:
+                    image = cv2.resize(image, (self.requested_width, self.requested_height))
 
-                if height != self.height:
-                    self.logger.info("Size changed to %s, %s" % (width, height))
-                    self.height = height
+                    if width != self.width:
+                        self.logger.info("Size changed to %s, %s" % (width, height))
+                        self.width = width
 
-            message = ImageMessage(image, self.num_frames, timestamp=timestamp)
-            self.log_to_buffer(time.time(), "Web socket image received: %s" % message)
-            self.check_buffer(self.num_frames)
+                    if height != self.height:
+                        self.logger.info("Size changed to %s, %s" % (width, height))
+                        self.height = height
 
-            await self.broadcast(message)
+                message = ImageMessage(image, self.num_frames, timestamp=timestamp)
+                self.log_to_buffer(time.time(), "Web socket image received: %s" % message)
+                self.check_buffer(self.num_frames)
 
-            self.poll_for_fps()
+                await self.broadcast(message)
 
-    async def old_loop(self):
-        while True:
-            await self.new_data_event.coro_wait()
-            if self.exit_event.is_set():
-                return
-            with self.image_lock:
-                jpg, timestamp, width, height = self.shared_list
+                self.poll_for_fps()
 
-            image = self.to_image(jpg)
+            if not self.command_queue.empty():
+                command = await self.command_queue.coro_get()
+                await self.broadcast(command, self.command_service_tag)
+            else:
+                if self.enable_images:
+                    await asyncio.sleep(0.0)
+                else:
+                    await asyncio.sleep(0.01)
 
-            if width != self.width or height != self.height:
-                image = cv2.resize(image, (self.requested_width, self.requested_height))
+    def retrieve_commands(self, response):
+        assert response.read(2) == self.response_start_header
+        try:
+            while not self.exit_event.is_set():
+                status, buffer = self.get_buffer(response, 4)
+                if status: return
+                response_len = int.from_bytes(buffer, self.endian)
+                if response_len == 0:
+                    continue
 
-                if width != self.width:
-                    self.logger.info("Size changed to %s, %s" % (width, height))
-                    self.width = width
+                status, buffer = self.get_buffer(response, 8)
+                if status: return
+                batch_timestamp = struct.unpack('d', buffer)[0]
 
-                if height != self.height:
-                    self.logger.info("Size changed to %s, %s" % (width, height))
-                    self.height = height
+                status, buffer = self.get_buffer(response, response_len)
+                if status: return
+                batch = buffer.decode()
 
-            message = ImageMessage(image, self.num_frames, timestamp=timestamp)
-            self.log_to_buffer(time.time(), "Web socket image received: %s" % message)
-            self.check_buffer(self.num_frames)
+                self.logger.info("batch time diff: %s" % (time.time() - batch_timestamp))
 
-            await self.broadcast(message)
+                sent_commands = False
+                packets = batch.split(";\n")
+                for packet in packets:
+                    if len(packet.strip()) > 0:
+                        timestamp, command = packet.split("-")
+                        timestamp = float(timestamp)
+                        self.logger.info("command received: %s, time diff: %s" % (command, time.time() - timestamp))
+                        self.command_queue.put(command)
 
-            self.poll_for_fps()
-            # self.log_to_buffer(time.time(), "image time diff: %s, fps: %s" % (time.time() - timestamp, self.fps))
-            self.new_data_event.clear()
-            await asyncio.sleep(0.01)
+                        sent_commands = True
+                if not sent_commands:
+                    time.sleep(0.01)
+
+        except BaseException:
+            self.exit_event.set()
+            raise
 
     def to_image(self, byte_stream):
         t0 = time.time()
+
+        # TODO: SUPER slow... causing a rate of 25 fps to dip to 5 fps
         image = cv2.imdecode(np.fromstring(byte_stream, dtype=np.uint8), 1)
         # image = cv2.imdecode(np.asarray(byte_stream, dtype=np.uint8), 1)
         # image = np.array(Image.open(StringIO(byte_stream)))
@@ -258,5 +282,12 @@ class CameraWebsiteClient(Node):
             self.writer.close()
 
         self.exit_event.set()
-        self.new_data_event.set()
-        await self.process.coro_join()
+        self.logger.info("exit event set")
+
+        if self.enable_images:
+            self.logger.info("waiting for image process...")
+            await self.image_process.coro_join()
+
+        self.logger.info("waiting for command process...")
+        await self.command_process.coro_join()
+        self.logger.info("done!")

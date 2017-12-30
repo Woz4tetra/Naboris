@@ -9,7 +9,7 @@ class NaborisCLI(Node):
     def __init__(self, enabled=True, prompt_text=">> "):
         super(NaborisCLI, self).__init__(enabled)
         self.prompt_text = prompt_text
-        self.queue = asyncio.Queue()
+        self.text_queue = asyncio.Queue()
 
         self.should_exit = False
 
@@ -30,6 +30,10 @@ class NaborisCLI(Node):
         )
         self.hardware = None
 
+        self.command_source_tag = "command_source"
+        self.command_source_sub = self.define_subscription(self.command_source_tag, is_required=False)
+        self.command_source_queue = None
+
         self.sounds_tag = "sounds"
         self.sounds_sub = self.define_subscription(self.sounds_tag, queue_size=None, is_required=False)
         self.sounds = None
@@ -37,7 +41,8 @@ class NaborisCLI(Node):
         self.guidance_tag = "guidance"
         self.guidance_sub = self.define_subscription(
             self.guidance_tag, queue_size=None,
-            required_methods=("goto", "cancel", "reset")
+            required_methods=("goto", "cancel", "reset"),
+            is_required=False
         )
         self.guidance = None
 
@@ -73,12 +78,25 @@ class NaborisCLI(Node):
 
     def handle_stdin(self):
         data = sys.stdin.readline()
-        asyncio.async(self.queue.put(data))
+        asyncio.async(self.text_queue.put(data))
 
     async def loop(self):
         while True:
             print("\r%s" % self.prompt_text, end="")
-            data = await self.queue.get()
+            if self.is_subscribed(self.command_source_tag):
+                if self.text_queue.empty() and self.command_source_queue.empty():
+                    await asyncio.sleep(0.05)
+                    continue
+
+                if not self.text_queue.empty():
+                    data = await self.text_queue.get()
+
+                if not self.command_source_queue.empty():
+                    data = await self.command_source_queue.get()
+
+            else:
+                data = await self.text_queue.get()
+
             try:
                 for command in data.split(";"):
                     self.handle_input(command.strip())
@@ -92,9 +110,13 @@ class NaborisCLI(Node):
 
     def take(self):
         self.hardware = self.hardware_sub.get_producer()
-        self.guidance = self.guidance_sub.get_producer()
+        if self.is_subscribed(self.command_source_tag):
+            self.guidance = self.guidance_sub.get_producer()
         if self.is_subscribed(self.sounds_tag):
             self.sounds = self.sounds_sub.get_producer()
+
+        if self.is_subscribed(self.command_source_tag):
+            self.command_source_queue = self.command_source_sub.get_queue()
 
     def spin_left(self, params):
         value = int(params) if len(params) > 0 else 75
@@ -225,13 +247,16 @@ class NaborisCLI(Node):
         self.guidance.goto(x, y, theta)
 
     def print_current_pos(self, params):
-        print("x=%0.2f, y=%0.2f, theta=%0.4f" % (self.guidance.current_x, self.guidance.current_y, self.guidance.current_th))
+        if not self.is_subscribed(self.guidance_tag):
+            print("x=%0.2f, y=%0.2f, theta=%0.4f" % (self.guidance.current_x, self.guidance.current_y, self.guidance.current_th))
 
     def cancel_goto_pos(self, params):
-        self.guidance.cancel()
+        if not self.is_subscribed(self.guidance_tag):
+            self.guidance.cancel()
 
     def reset_odometry(self, params):
-        self.guidance.reset()
+        if not self.is_subscribed(self.guidance_tag):
+            self.guidance.reset()
 
     def help(self, params):
         print("\nAvailable commands:")
