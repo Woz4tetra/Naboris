@@ -1,6 +1,5 @@
 import cv2
 import time
-import json
 import base64
 import struct
 import asyncio
@@ -109,7 +108,7 @@ class WebsiteClient(Node):
                     self.exit_event.set()
                     raise RuntimeError("Frame size is larger than the expected amount (%s > %s). Exiting." % (
                         frame_size, self.requested_width * self.requested_height)
-                    )
+                                       )
 
                 status, frame = self.get_buffer(response, frame_size)
 
@@ -146,7 +145,8 @@ class WebsiteClient(Node):
                 self.logger.info("avg fps: %s" % (sum_fps / num_frames))
             else:
                 self.exit_event.set()
-                raise RuntimeError("Response doesn't match header (received %s != %s)" % (buffer, self.message_start_header))
+                raise RuntimeError(
+                    "Response doesn't match header (received %s != %s)" % (buffer, self.message_start_header))
 
     def wait_for_header(self, response):
         buffer = b''

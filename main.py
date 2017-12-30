@@ -26,18 +26,21 @@ class NaborisOrchestrator(Orchestrator):
             enabled=False
         )
 
-        "10.76.76.1"
+        client = WebsiteConnection("10.76.76.1", user="robot", password="naboris")
+
         self.odometry = Odometry()
         self.guidance = BasicGuidance(enabled=False)
-        self.client = WebsiteClient(720, 480, enabled=False, enable_images=False)
+        self.camera_client = CameraClient(client, 720, 480, enabled=False)
+        self.command_client = CommandClient(client)
         self.picamera = PiCamera(enabled=False)
 
-        self.add_nodes(self.hardware, self.cli, self.sounds, self.guidance, self.odometry, self.client, self.picamera)
+        self.add_nodes(self.hardware, self.cli, self.sounds, self.guidance, self.odometry, self.camera_client,
+                       self.command_client, self.picamera)
 
         self.subscribe(self.sounds, self.cli, self.cli.sounds_tag)
         self.subscribe(self.hardware, self.cli, self.cli.hardware_tag)
         self.subscribe(self.guidance, self.cli, self.cli.guidance_tag)
-        self.subscribe(self.client, self.cli, self.cli.command_source_tag, self.client.command_service_tag)
+        self.subscribe(self.command_client, self.cli, self.cli.command_source_tag)
 
         self.subscribe(self.odometry, self.guidance, self.guidance.odometry_tag)
         self.subscribe(self.hardware, self.guidance, self.guidance.hardware_tag)
