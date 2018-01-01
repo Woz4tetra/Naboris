@@ -1,5 +1,4 @@
 import base64
-import aiohttp
 from http.client import HTTPConnection
 
 

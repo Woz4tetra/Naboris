@@ -16,7 +16,7 @@ class CommandOrchestrator(Orchestrator):
         self.hardware = HardwareInterface(enabled=False)
         self.cli = NaborisCLI(enabled=False)
 
-        client = WebsiteConnection("10.76.76.1", user="robot", password="naboris", timeout=5)
+        client = WebsiteConnection("10.76.76.1", user="robot", password="naboris", timeout=10)
 
         self.command_client = CommandClient(client)
 

@@ -79,22 +79,22 @@ class BaseClient(Node):
                     return
 
     def get_buffer(self, response, sock, length):
-        t0 = time.time()
-        while True:
-            ta = time.time()
-            readable, writable, exceptional = select.select([sock], [], [], 0.05)
-            if len(readable) > 0:
-                break
-            tb = time.time()
-
-            print(tb - ta)
-
-            if self.exit_event.is_set():
-                return True, None
-            if time.time() - t0 > 5:
-                print("waiting...")
-                t0 = time.time()
-            time.sleep(0.05)
+        # t0 = time.time()
+        # while True:
+        #     ta = time.time()
+        #     readable, writable, exceptional = select.select([sock], [], [], 0.05)
+        #     if len(readable) > 0:
+        #         break
+        #     tb = time.time()
+        #
+        #     print(tb - ta)
+        #
+        #     if self.exit_event.is_set():
+        #         return True, None
+        #     if time.time() - t0 > 5:
+        #         print("waiting...")
+        #         t0 = time.time()
+        #     time.sleep(0.05)
 
         try:
             buffer = response.read(length)
@@ -153,4 +153,3 @@ class BaseClient(Node):
         # self.process.delegate.terminate(self.process.delegate)
         await self.process.coro_join()
         self.logger.info("done!")
-
